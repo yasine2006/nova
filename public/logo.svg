@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" fill="none">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- N icon with circuit lines -->
+  <g transform="translate(10, 10)">
+    <!-- Main N shape -->
+    <path d="M5 75V15L25 55V15" stroke="url(#grad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- Circuit lines -->
+    <line x1="25" y1="55" x2="45" y2="55" stroke="#38BDF8" stroke-width="2" stroke-dasharray="3 3"/>
+    <line x1="5" y1="45" x2="5" y2="75" stroke="#38BDF8" stroke-width="2" stroke-dasharray="3 3"/>
+    <circle cx="45" cy="55" r="3" fill="#38BDF8"/>
+    <circle cx="5" cy="75" r="3" fill="#2563EB"/>
+    <!-- Corner accents -->
+    <line x1="0" y1="0" x2="15" y2="0" stroke="#38BDF8" stroke-width="1.5" opacity="0.5"/>
+    <line x1="0" y1="0" x2="0" y2="15" stroke="#38BDF8" stroke-width="1.5" opacity="0.5"/>
+    <line x1="40" y1="70" x2="50" y2="70" stroke="#2563EB" stroke-width="1.5" opacity="0.5"/>
+    <line x1="50" y1="60" x2="50" y2="70" stroke="#2563EB" stroke-width="1.5" opacity="0.5"/>
+  </g>
+
+  <!-- Text -->
+  <text x="90" y="48" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="42" font-weight="800" fill="white" letter-spacing="2">NOVA</text>
+  <text x="90" y="82" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="22" font-weight="600" fill="#38BDF8" letter-spacing="8">BNISIT</text>
+</svg>
