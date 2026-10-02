@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { escapeIdentifier } from "@neondatabase/serverless";
 import { getSql, isDatabaseConfigured, tryQuery } from "./db";
 import { requireAdmin } from "./auth";
 
@@ -357,22 +356,22 @@ export const deleteFaqFn = createServerFn({ method: "POST" })
 
 // ─── Réordonnancement ──────────────────────────────────────
 
-const SORTABLE_TABLES = new Set([
-  "projects",
-  "services",
-  "testimonials",
-  "faqs",
-]);
+const SORTABLE_TABLES: Record<string, string> = {
+  projects: "projects",
+  services: "services",
+  testimonials: "testimonials",
+  faqs: "faqs",
+};
 
 export const reorderFn = createServerFn({ method: "POST" })
   .validator((data: { table: string; ids: number[] }) => data)
   .handler(async ({ data }) => {
     await requireAdmin();
 
-    if (!SORTABLE_TABLES.has(data.table)) throw new Error("Table inconnue.");
+    // Liste blanche : le nom injecté provient uniquement de cette table connue.
+    const table = SORTABLE_TABLES[data.table];
+    if (!table) throw new Error("Table inconnue.");
 
-    // escapeIdentifier + liste blanche : aucune injection SQL possible.
-    const table = escapeIdentifier(data.table);
     const sql = getSql();
     const statement = `UPDATE ${table} SET sort_order = $1 WHERE id = $2`;
 
