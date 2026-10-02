@@ -4,7 +4,7 @@ import {
   useRouter,
   redirect,
 } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -775,6 +775,14 @@ function ProjectModal({
   onSave: (value: typeof EMPTY_PROJECT) => void;
 }) {
   const [form, setForm] = useState(value);
+
+  useEffect(() => {
+    setForm((f) =>
+      f.image_url === value.image_url
+        ? f
+        : { ...f, image_url: value.image_url },
+    );
+  }, [value.image_url]);
   const set = <K extends keyof typeof EMPTY_PROJECT>(
     key: K,
     v: (typeof EMPTY_PROJECT)[K],
