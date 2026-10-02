@@ -1,20 +1,69 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
 import {
-  MessageSquare, Briefcase, Quote, HelpCircle, ArrowLeft, Plus, Trash2,
-  Check, Eye, EyeOff, Mail, Building2, Clock, Loader2, AlertCircle,
-  Save, X, ChevronDown, ChevronUp, RefreshCw, Image, ExternalLink, Upload, LogOut,
-  LayoutDashboard, Pencil, BarChart3, Users, FolderOpen, Star, Zap, TrendingUp,
+  createFileRoute,
+  Link,
+  useRouter,
+  redirect,
+} from "@tanstack/react-router";
+import { useState } from "react";
+import {
+  LayoutDashboard,
+  MessageSquare,
+  FolderOpen,
+  Briefcase,
+  Quote,
+  HelpCircle,
+  Settings as SettingsIcon,
+  LogOut,
+  Plus,
+  Save,
+  Trash2,
+  Pencil,
+  X,
+  Loader2,
+  AlertCircle,
+  Check,
+  Mail,
+  Phone,
+  MapPin,
+  Clock,
+  Globe,
+  ArrowUp,
+  ArrowDown,
+  Image as ImageIcon,
+  ExternalLink,
+  Eye,
+  Database,
+  FileCode,
 } from "lucide-react";
+import { getAuthStatusFn, logoutFn } from "@/api/auth";
 import {
-  supabaseConfigured, supabase, signOut, getSession,
-  getContacts, markContactRead, deleteContact,
-  getServices, upsertService, deleteService,
-  getTestimonials, upsertTestimonial, deleteTestimonial,
-  getFaqs, upsertFaq, deleteFaq,
-  getProjects, upsertProject, deleteProject,
-  type ContactMessage, type Service, type Testimonial, type FAQ, type Project,
-} from "@/lib/supabase";
+  deleteFaqFn,
+  deleteProjectFn,
+  deleteServiceFn,
+  deleteTestimonialFn,
+  getAdminContentFn,
+  reorderFn,
+  saveFaqFn,
+  saveProjectFn,
+  saveServiceFn,
+  saveSettingsFn,
+  saveTestimonialFn,
+} from "@/api/content";
+import {
+  deleteMessageFn,
+  getMessagesFn,
+  getStatsFn,
+  setMessageReadFn,
+} from "@/api/messages";
+import { MAX_UPLOAD_BYTES, uploadImageFn } from "@/api/upload";
+
+const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
+import {
+  faqs as fallbackFaqs,
+  services as fallbackServices,
+} from "@/data/site";
+
+// ============================================================
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -23,847 +72,1576 @@ export const Route = createFileRoute("/admin")({
       { title: "Administration — NOVA BNISIT" },
     ],
   }),
+  // Garde d'UX seulement. La vraie sécurité est dans requireAdmin()
+  // sur chaque server fn : un appel direct sans session est refusé.
+  beforeLoad: async () => {
+    const { authenticated } = await getAuthStatusFn();
+    if (!authenticated) throw redirect({ to: "/login" });
+  },
+  loader: async () => {
+    const [content, messages, stats] = await Promise.all([
+      getAdminContentFn(),
+      getMessagesFn(),
+      getStatsFn(),
+    ]);
+    return { content, messages, stats };
+  },
   component: Admin,
 });
 
-type Tab = "dashboard" | "contacts" | "services" | "testimonials" | "faqs" | "portfolio";
+type Tab =
+  | "dashboard"
+  | "contacts"
+  | "projects"
+  | "services"
+  | "testimonials"
+  | "faqs"
+  | "settings";
+
+const NAV: Array<{
+  key: Tab;
+  label: string;
+  icon: typeof MessageSquare;
+  color: string;
+}> = [
+  {
+    key: "dashboard",
+    label: "Tableau de bord",
+    icon: LayoutDashboard,
+    color: "#38BDF8",
+  },
+  { key: "contacts", label: "Messages", icon: MessageSquare, color: "#2563EB" },
+  { key: "projects", label: "Portfolio", icon: FolderOpen, color: "#10B981" },
+  { key: "services", label: "Services", icon: Briefcase, color: "#F59E0B" },
+  { key: "testimonials", label: "Témoignages", icon: Quote, color: "#8B5CF6" },
+  { key: "faqs", label: "FAQ", icon: HelpCircle, color: "#EC4899" },
+  {
+    key: "settings",
+    label: "Coordonnées",
+    icon: SettingsIcon,
+    color: "#64748B",
+  },
+];
+
+// ─── Helpers ──────────────────────────────────────────────
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message === "UNAUTHORIZED")
+      return "Session expirée — reconnectez-vous.";
+    return error.message.replace(/^Server function error:\s*/, "");
+  }
+  return "Erreur inconnue.";
+}
 
 function Admin() {
+  const router = useRouter();
+  const { content, messages, stats } = Route.useLoaderData();
   const [tab, setTab] = useState<Tab>("dashboard");
-  const [authenticated, setAuthenticated] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
 
-  useEffect(() => {
-    if (!supabaseConfigured) return;
-    getSession().then((s) => {
-      if (!s) {
-        window.location.href = "/login";
-      } else {
-        setAuthenticated(true);
-      }
-    });
-  }, []);
+  const [notice, setNotice] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
 
-  if (!supabaseConfigured) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "#050816" }}>
-        <div className="max-w-md text-center">
-          <AlertCircle size={48} className="mx-auto mb-4 text-amber-400" />
-          <h1 className="text-2xl font-bold text-white mb-3">Supabase non configuré</h1>
-          <p className="text-white/50 text-sm mb-6">
-            Ajoutez <code className="text-[#38BDF8]">VITE_SUPABASE_URL</code> et{" "}
-            <code className="text-[#38BDF8]">VITE_SUPABASE_ANON_KEY</code> dans votre fichier <code>.env</code>
-          </p>
-          <Link to="/" className="inline-flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors">
-            <ArrowLeft size={16} /> Retour à l'accueil
-          </Link>
-        </div>
-      </div>
-    );
+  function flash(kind: "ok" | "error", text: string) {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 4000);
   }
 
-  if (!authenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#050816" }}>
-        <Loader2 size={32} className="animate-spin text-[#38BDF8]" />
-      </div>
-    );
+  /** Enveloppe une server fn : gère les erreurs + rafraîchit les données. */
+  async function run(fn: () => Promise<unknown>, successText: string) {
+    try {
+      await fn();
+      await router.invalidate();
+      flash("ok", successText);
+      return true;
+    } catch (error) {
+      flash("error", errorMessage(error));
+      return false;
+    }
   }
 
   async function handleLogout() {
-    setLoggingOut(true);
-    await signOut();
+    await logoutFn();
     window.location.href = "/login";
   }
 
-  const navItems: { key: Tab; label: string; icon: typeof MessageSquare; color: string }[] = [
-    { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard, color: "#38BDF8" },
-    { key: "contacts", label: "Messages", icon: MessageSquare, color: "#2563EB" },
-    { key: "portfolio", label: "Portfolio", icon: FolderOpen, color: "#10B981" },
-    { key: "services", label: "Services", icon: Briefcase, color: "#F59E0B" },
-    { key: "testimonials", label: "Témoignages", icon: Quote, color: "#8B5CF6" },
-    { key: "faqs", label: "FAQ", icon: HelpCircle, color: "#EC4899" },
-  ];
-
   return (
-    <div className="min-h-screen flex" style={{ background: "#050816" }}>
-      {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/5" style={{ background: "rgba(8,12,24,0.95)" }}>
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/5">
-          <img src="/favicon.png" alt="NOVA BNISIT" className="h-20 w-20 object-contain" />
-        </div>
+    <div className="min-h-screen" style={{ background: "#050816" }}>
+      <div className="flex">
+        {/* ── Sidebar ── */}
+        <aside
+          className="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/5"
+          style={{ background: "rgba(8,12,24,0.97)" }}
+        >
+          <div className="flex items-center gap-3 border-b border-white/5 px-5 py-4">
+            <img src="/favicon.png" alt="" className="h-10 w-10" />
+            <div>
+              <p className="text-sm font-bold text-white">NOVA BNISIT</p>
+              <p className="text-[10px] uppercase tracking-wider text-white/30">
+                Administration
+              </p>
+            </div>
+          </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((n) => {
-            const active = tab === n.key;
-            return (
-              <button
-                key={n.key}
-                onClick={() => setTab(n.key)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
-                  active
-                    ? "text-white"
-                    : "text-white/35 hover:text-white/70 hover:bg-white/[0.04]"
-                }`}
-                style={active ? { background: `${n.color}15`, boxShadow: `inset 3px 0 0 ${n.color}` } : {}}
-              >
-                <n.icon size={17} style={active ? { color: n.color } : {}} />
-                {n.label}
-              </button>
-            );
-          })}
-        </nav>
+          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+            {NAV.map((item) => {
+              const active = tab === item.key;
+              const badge =
+                item.key === "contacts" && stats.unread > 0
+                  ? stats.unread
+                  : null;
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => setTab(item.key)}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition"
+                  style={{
+                    background: active ? `${item.color}1A` : "transparent",
+                    color: active ? item.color : "rgba(255,255,255,0.55)",
+                    border: `1px solid ${active ? `${item.color}33` : "transparent"}`,
+                  }}
+                >
+                  <item.icon size={17} />
+                  <span className="flex-1 font-medium">{item.label}</span>
+                  {badge && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                      style={{ background: item.color }}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-        <div className="border-t border-white/5 p-3 space-y-2">
-          <Link to="/" className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm text-white/30 hover:text-white/60 hover:bg-white/[0.04] transition-colors">
-            <ArrowLeft size={16} />
-            Voir le site
-          </Link>
-          <button
-            onClick={handleLogout}
-            disabled={loggingOut}
-            className="flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm text-white/30 hover:text-red-400 hover:bg-red-500/[0.06] transition-colors"
-          >
-            <LogOut size={16} />
-            Déconnexion
-          </button>
-        </div>
-      </aside>
+          <div className="space-y-1 border-t border-white/5 px-3 py-4">
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-red-400/80 transition hover:bg-red-500/10"
+            >
+              <LogOut size={17} /> Déconnexion
+            </button>
+            <Link
+              to="/"
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/40 transition hover:text-white"
+            >
+              <ExternalLink size={17} /> Voir le site
+            </Link>
+          </div>
+        </aside>
 
-      {/* Main content */}
-      <main className="ml-64 flex-1 p-8">
-        <div className="max-w-6xl">
-          {tab === "dashboard" && <DashboardTab onNavigate={setTab} />}
-          {tab === "contacts" && <ContactsTab />}
-          {tab === "portfolio" && <PortfolioTab />}
-          {tab === "services" && <ServicesTab />}
-          {tab === "testimonials" && <TestimonialsTab />}
-          {tab === "faqs" && <FaqsTab />}
-        </div>
-      </main>
+        {/* ── Contenu ── */}
+        <main className="ml-64 flex-1 p-8">
+          <header className="mb-8 flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-white">
+              {NAV.find((n) => n.key === tab)?.label}
+            </h1>
+            <span className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
+              <Database size={12} />
+              {content.projects.length || content.settings.email
+                ? "Base connectée"
+                : "Mode fichier"}
+            </span>
+          </header>
+
+          {notice && (
+            <div
+              className="mb-6 flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
+              style={{
+                background:
+                  notice.kind === "ok"
+                    ? "rgba(16,185,129,0.1)"
+                    : "rgba(239,68,68,0.1)",
+                color: notice.kind === "ok" ? "#34D399" : "#F87171",
+              }}
+            >
+              {notice.kind === "ok" ? (
+                <Check size={16} />
+              ) : (
+                <AlertCircle size={16} />
+              )}
+              {notice.text}
+            </div>
+          )}
+
+          {tab === "dashboard" && (
+            <Dashboard
+              stats={stats}
+              content={content}
+              messages={messages}
+              onJump={setTab}
+            />
+          )}
+          {tab === "contacts" && <Messages messages={messages} run={run} />}
+          {tab === "projects" && <Projects content={content} run={run} />}
+          {tab === "services" && (
+            <ServicesAdmin rows={content.services} run={run} />
+          )}
+          {tab === "testimonials" && (
+            <TestimonialsAdmin rows={content.testimonials} run={run} />
+          )}
+          {tab === "faqs" && <FaqsAdmin rows={content.faqs} run={run} />}
+          {tab === "settings" && (
+            <SettingsAdmin settings={content.settings} run={run} />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
 
-// ─── Dashboard Overview ────────────────────────────────────
+type RunFn = (
+  fn: () => Promise<unknown>,
+  successText: string,
+) => Promise<boolean>;
 
-function DashboardTab({ onNavigate }: { onNavigate: (t: Tab) => void }) {
-  const [stats, setStats] = useState({ contacts: 0, unread: 0, services: 0, testimonials: 0, faqs: 0, projects: 0 });
-  const [recentContacts, setRecentContacts] = useState<ContactMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+// ─── Tableau de bord ──────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [c, s, t, f, p] = await Promise.all([getContacts(), getServices(), getTestimonials(), getFaqs(), getProjects()]);
-        setStats({
-          contacts: c.length,
-          unread: c.filter((x) => !x.read).length,
-          services: s.length,
-          testimonials: t.length,
-          faqs: f.length,
-          projects: p.length,
-        });
-        setRecentContacts(c.slice(0, 5));
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    })();
-  }, []);
-
-  if (loading) return <LoadingState />;
-
-  const cards: { label: string; value: number; icon: typeof MessageSquare; color: string; badge?: number; tab: Tab }[] = [
-    { label: "Messages", value: stats.contacts, icon: MessageSquare, color: "#2563EB", badge: stats.unread, tab: "contacts" },
-    { label: "Projets", value: stats.projects, icon: FolderOpen, color: "#10B981", tab: "portfolio" },
-    { label: "Services", value: stats.services, icon: Briefcase, color: "#F59E0B", tab: "services" },
-    { label: "Témoignages", value: stats.testimonials, icon: Quote, color: "#8B5CF6", tab: "testimonials" },
-    { label: "FAQ", value: stats.faqs, icon: HelpCircle, color: "#EC4899", tab: "faqs" },
+function Dashboard({
+  stats,
+  content,
+  messages,
+  onJump,
+}: {
+  stats: { total: number; unread: number };
+  content: Awaited<ReturnType<typeof getAdminContentFn>>;
+  messages: Awaited<ReturnType<typeof getMessagesFn>>;
+  onJump: (tab: Tab) => void;
+}) {
+  const cards = [
+    {
+      label: "Messages reçus",
+      value: stats.total,
+      icon: MessageSquare,
+      color: "#2563EB",
+    },
+    { label: "Non lus", value: stats.unread, icon: Mail, color: "#EF4444" },
+    {
+      label: "Projets",
+      value: content.projects.length,
+      icon: FolderOpen,
+      color: "#10B981",
+    },
+    {
+      label: "Services",
+      value: content.services.length,
+      icon: Briefcase,
+      color: "#F59E0B",
+    },
+    {
+      label: "Témoignages",
+      value: content.testimonials.length,
+      icon: Quote,
+      color: "#8B5CF6",
+    },
+    {
+      label: "FAQ",
+      value: content.faqs.length,
+      icon: HelpCircle,
+      color: "#EC4899",
+    },
   ];
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Tableau de bord</h1>
-        <p className="text-sm text-white/35 mt-1">Vue d'ensemble de votre site</p>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        {cards.map((card) => (
+          <div key={card.label} className="glass flex items-center gap-4 p-5">
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+              style={{
+                background: `${card.color}1A`,
+                border: `1px solid ${card.color}33`,
+              }}
+            >
+              <card.icon size={19} style={{ color: card.color }} />
+            </div>
+            <div>
+              <p className="text-2xl font-extrabold text-white">{card.value}</p>
+              <p className="text-xs text-white/40">{card.label}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        {cards.map((c) => (
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="glass p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold text-white">Derniers messages</h2>
+            <button
+              onClick={() => onJump("contacts")}
+              className="text-xs text-[color:var(--brand-2)] hover:underline"
+            >
+              Tout voir
+            </button>
+          </div>
+          {messages.length === 0 ? (
+            <p className="py-8 text-center text-sm text-white/30">
+              Aucun message pour l'instant.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {messages.slice(0, 5).map((m) => (
+                <li
+                  key={m.id}
+                  className="flex items-start gap-3 border-b border-white/5 pb-3 last:border-0"
+                >
+                  {!m.read && (
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#38BDF8]" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-white">
+                      {m.name}{" "}
+                      <span className="text-white/30">— {m.email}</span>
+                    </p>
+                    <p className="truncate text-xs text-white/40">
+                      {m.message}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="glass space-y-3 p-6">
+          <h2 className="font-semibold text-white">Raccourcis</h2>
+          {[
+            {
+              tab: "projects" as Tab,
+              label: "Ajouter un projet au portfolio",
+              icon: FolderOpen,
+            },
+            {
+              tab: "contacts" as Tab,
+              label: "Lire les messages des clients",
+              icon: MessageSquare,
+            },
+            {
+              tab: "settings" as Tab,
+              label: "Modifier email / téléphone / WhatsApp",
+              icon: SettingsIcon,
+            },
+            {
+              tab: "services" as Tab,
+              label: "Éditer les services",
+              icon: Briefcase,
+            },
+          ].map((item) => (
+            <button
+              key={item.tab}
+              onClick={() => onJump(item.tab)}
+              className="flex w-full items-center gap-3 rounded-xl bg-white/[0.03] px-4 py-3 text-left text-sm text-white/70 transition hover:bg-white/[0.07]"
+            >
+              <item.icon size={16} className="text-white/40" />
+              {item.label}
+            </button>
+          ))}
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-200/80">
+            Si une section affiche 0 élément, c'est qu'aucune ligne n'existe
+            encore en base — le site affiche alors le contenu de{" "}
+            <code className="text-amber-200">src/data/site.ts</code>. Ajoutez un
+            élément pour prendre le contrôle.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Messages ─────────────────────────────────────────────
+
+function Messages({
+  messages,
+  run,
+}: {
+  messages: Awaited<ReturnType<typeof getMessagesFn>>;
+  run: RunFn;
+}) {
+  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const shown =
+    filter === "unread" ? messages.filter((m) => !m.read) : messages;
+
+  if (messages.length === 0) {
+    return (
+      <EmptyState
+        icon={Mail}
+        title="Aucun message"
+        text="Les messages envoyés via le formulaire de contact apparaîtront ici."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        {(["all", "unread"] as const).map((key) => (
           <button
-            key={c.label}
-            onClick={() => onNavigate(c.tab)}
-            className="glass p-5 text-left group hover:border-white/15 transition-all relative overflow-hidden"
+            key={key}
+            onClick={() => setFilter(key)}
+            className="rounded-xl px-4 py-2 text-sm font-medium transition"
+            style={{
+              background:
+                filter === key ? "rgba(56,189,248,0.12)" : "transparent",
+              color: filter === key ? "#38BDF8" : "rgba(255,255,255,0.5)",
+              border: `1px solid ${filter === key ? "rgba(56,189,248,0.3)" : "rgba(255,255,255,0.08)"}`,
+            }}
           >
-            <div className="absolute top-0 right-0 h-20 w-20 rounded-full blur-3xl opacity-10" style={{ background: c.color }} />
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: `${c.color}18` }}>
-                <c.icon size={18} style={{ color: c.color }} />
-              </div>
-              {c.badge !== undefined && c.badge > 0 && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#2563EB] px-1.5 text-[10px] font-bold text-white">
-                  {c.badge}
-                </span>
-              )}
-            </div>
-            <p className="text-2xl font-bold text-white">{c.value}</p>
-            <p className="text-xs text-white/35 mt-0.5">{c.label}</p>
+            {key === "all"
+              ? `Tous (${messages.length})`
+              : `Non lus (${messages.filter((m) => !m.read).length})`}
           </button>
         ))}
       </div>
 
-      {/* Recent contacts */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-white">Messages récents</h2>
-          <button onClick={() => onNavigate("contacts")} className="text-xs text-[#38BDF8] hover:text-[#2563EB] transition-colors">
-            Tout voir →
-          </button>
-        </div>
-        {recentContacts.length === 0 ? (
-          <div className="glass p-8 text-center">
-            <MessageSquare size={32} className="mx-auto text-white/10 mb-3" />
-            <p className="text-sm text-white/30">Aucun message</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {recentContacts.map((c) => (
-              <div key={c.id} className={`glass flex items-center justify-between p-4 ${!c.read ? "border-l-2 border-l-[#2563EB]" : ""}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${!c.read ? "bg-[#2563EB]/20 text-[#38BDF8]" : "bg-white/5 text-white/30"}`}>
-                    {c.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">{c.name} {!c.read && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#2563EB]" />}</p>
-                    <p className="text-xs text-white/30">{c.email} {c.company ? `· ${c.company}` : ""}</p>
-                  </div>
-                </div>
-                <span className="text-xs text-white/20">
-                  {c.created_at ? new Date(c.created_at).toLocaleDateString("fr-FR") : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Contacts Tab ───────────────────────────────────────────
-
-function ContactsTab() {
-  const [contacts, setContacts] = useState<ContactMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  async function load() {
-    setLoading(true);
-    try { setContacts(await getContacts()); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function toggleRead(id: string, current: boolean) {
-    await markContactRead(id, !current);
-    setContacts((prev) => prev.map((c) => c.id === id ? { ...c, read: !current } : c));
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer ce message ?")) return;
-    await deleteContact(id);
-    setContacts((prev) => prev.filter((c) => c.id !== id));
-  }
-
-  const unread = contacts.filter((c) => !c.read).length;
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Messages de contact</h1>
-          <p className="text-sm text-white/35 mt-1">{contacts.length} message{contacts.length !== 1 ? "s" : ""} · {unread} non lu{unread !== 1 ? "s" : ""}</p>
-        </div>
-        <button onClick={load} className="flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-white/50 hover:text-white transition-colors">
-          <RefreshCw size={14} /> Actualiser
-        </button>
-      </div>
-
-      {contacts.length === 0 ? (
-        <EmptyState icon={MessageSquare} text="Aucun message pour l'instant" />
+      {shown.length === 0 ? (
+        <p className="py-12 text-center text-sm text-white/30">
+          Aucun message non lu.
+        </p>
       ) : (
-        <div className="space-y-3">
-          {contacts.map((c) => (
-            <div key={c.id} className={`glass overflow-hidden transition-all ${!c.read ? "border-l-2 border-l-[#2563EB]" : ""}`}>
-              <button
-                onClick={() => setExpandedId(expandedId === c.id ? null : c.id!)}
-                className="w-full flex items-center justify-between p-5 text-left"
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${!c.read ? "bg-[#2563EB]/20 text-[#38BDF8]" : "bg-white/5 text-white/30"}`}>
-                    {c.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-white text-sm">{c.name} {!c.read && <span className="ml-2 inline-block h-2 w-2 rounded-full bg-[#2563EB]" />}</p>
-                    <p className="text-xs text-white/35">{c.email} {c.company ? `· ${c.company}` : ""}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-white/25">
-                    {c.created_at ? new Date(c.created_at).toLocaleDateString("fr-FR") : ""}
-                  </span>
-                  {expandedId === c.id ? <ChevronUp size={16} className="text-white/30" /> : <ChevronDown size={16} className="text-white/30" />}
-                </div>
-              </button>
-              {expandedId === c.id && (
-                <div className="border-t border-white/5 px-5 pb-5">
-                  <p className="mt-4 text-sm text-white/60 leading-relaxed whitespace-pre-wrap">{c.message}</p>
-                  <div className="mt-4 flex gap-2">
-                    <button onClick={() => toggleRead(c.id!, c.read!)} className="flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs text-white/60 hover:text-white transition-colors">
-                      {c.read ? <><EyeOff size={12} /> Marquer non-lu</> : <><Eye size={12} /> Marquer lu</>}
-                    </button>
-                    <button onClick={() => handleDelete(c.id!)} className="flex items-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 transition-colors">
-                      <Trash2 size={12} /> Supprimer
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Services Tab ───────────────────────────────────────────
-
-const ICON_OPTIONS = ["Code2", "Brain", "BarChart3", "Zap", "Rocket", "Shield", "Headphones", "Globe", "Wrench", "Compass"];
-const COLOR_OPTIONS = ["#2563EB", "#38BDF8", "#60A5FA", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"];
-
-function ServicesTab() {
-  const [items, setItems] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Service | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try { setItems(await getServices()); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  function startCreate() {
-    setIsCreating(true);
-    setEditing({ title: "", description: "", icon: "Code2", color: "#2563EB", sort_order: items.length + 1 });
-  }
-
-  async function handleSave(s: Service) {
-    try { await upsertService(s); await load(); setEditing(null); setIsCreating(false); } catch (e) { console.error(e); }
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer ce service ?")) return;
-    await deleteService(id);
-    setItems((prev) => prev.filter((s) => s.id !== id));
-  }
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Services</h1>
-          <p className="text-sm text-white/35 mt-1">{items.length} service{items.length !== 1 ? "s" : ""}</p>
-        </div>
-        <button onClick={startCreate} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-colors" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Plus size={15} /> Ajouter
-        </button>
-      </div>
-
-      {editing && <ServiceForm item={editing} onSave={handleSave} onCancel={() => { setEditing(null); setIsCreating(false); }} />}
-
-      {items.length === 0 ? (
-        <EmptyState icon={Briefcase} text="Aucun service" />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {items.map((s) => (
-            <div key={s.id} className="glass p-5 group hover:border-white/15 transition-all">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold" style={{ background: `${s.color}18`, color: s.color }}>
-                    {s.icon.charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white text-sm">{s.title}</h3>
-                    <p className="text-xs text-white/35 mt-0.5 line-clamp-2 max-w-xs">{s.description}</p>
-                  </div>
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setEditing(s)} className="rounded-lg bg-white/5 p-2 text-white/40 hover:text-[#38BDF8] hover:bg-[#38BDF8]/10 transition-colors" title="Modifier">
-                    <Pencil size={13} />
-                  </button>
-                  <button onClick={() => handleDelete(s.id!)} className="rounded-lg bg-red-500/10 p-2 text-red-400 hover:text-red-300 transition-colors" title="Supprimer">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ServiceForm({ item, onSave, onCancel }: { item: Service; onSave: (s: Service) => void; onCancel: () => void }) {
-  const [form, setForm] = useState(item);
-  return (
-    <div className="glass p-6 border border-[#2563EB]/30 rounded-2xl">
-      <h3 className="text-sm font-bold text-white mb-4">{item.id ? "Modifier le service" : "Nouveau service"}</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Input label="Titre" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
-        <div>
-          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Icône</label>
-          <select value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })}
-            className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-2.5 text-sm text-white focus:border-[#2563EB] focus:outline-none">
-            {ICON_OPTIONS.map((i) => <option key={i} value={i}>{i}</option>)}
-          </select>
-        </div>
-        <div className="sm:col-span-2">
-          <Textarea label="Description" value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Couleur</label>
-          <div className="flex gap-2 mt-2">
-            {COLOR_OPTIONS.map((c) => (
-              <button key={c} onClick={() => setForm({ ...form, color: c })}
-                className={`h-8 w-8 rounded-lg transition-all ${form.color === c ? "ring-2 ring-white ring-offset-2 ring-offset-[#050816]" : "hover:scale-110"}`}
-                style={{ background: c }} />
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="flex gap-2 mt-5">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Check size={14} /> Enregistrer
-        </button>
-        <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-4 py-2.5 text-sm text-white/50 hover:text-white transition-colors">
-          <X size={14} /> Annuler
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Testimonials Tab ───────────────────────────────────────
-
-function TestimonialsTab() {
-  const [items, setItems] = useState<Testimonial[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Testimonial | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try { setItems(await getTestimonials()); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  function startCreate() {
-    setIsCreating(true);
-    setEditing({ name: "", role: "", quote: "", sort_order: items.length + 1 });
-  }
-
-  async function handleSave(t: Testimonial) {
-    try { await upsertTestimonial(t); await load(); setEditing(null); setIsCreating(false); } catch (e) { console.error(e); }
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer ce témoignage ?")) return;
-    await deleteTestimonial(id);
-    setItems((prev) => prev.filter((t) => t.id !== id));
-  }
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Témoignages</h1>
-          <p className="text-sm text-white/35 mt-1">{items.length} témoignage{items.length !== 1 ? "s" : ""}</p>
-        </div>
-        <button onClick={startCreate} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-colors" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Plus size={15} /> Ajouter
-        </button>
-      </div>
-
-      {editing && <TestimonialForm item={editing} onSave={handleSave} onCancel={() => { setEditing(null); setIsCreating(false); }} />}
-
-      {items.length === 0 ? (
-        <EmptyState icon={Quote} text="Aucun témoignage" />
-      ) : (
-        <div className="space-y-3">
-          {items.map((t) => (
-            <div key={t.id} className="glass p-5 group hover:border-white/15 transition-all">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Star size={14} className="text-[#F59E0B] fill-[#F59E0B]" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/25">Témoignage</span>
-                  </div>
-                  <p className="text-sm text-white/60 italic leading-relaxed">&laquo; {t.quote} &raquo;</p>
-                  <p className="mt-2 text-xs text-white/40 font-semibold">{t.name} — {t.role}</p>
-                </div>
-                <div className="flex gap-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setEditing(t)} className="rounded-lg bg-white/5 p-2 text-white/40 hover:text-[#38BDF8] hover:bg-[#38BDF8]/10 transition-colors" title="Modifier">
-                    <Pencil size={13} />
-                  </button>
-                  <button onClick={() => handleDelete(t.id!)} className="rounded-lg bg-red-500/10 p-2 text-red-400 hover:text-red-300 transition-colors" title="Supprimer">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TestimonialForm({ item, onSave, onCancel }: { item: Testimonial; onSave: (t: Testimonial) => void; onCancel: () => void }) {
-  const [form, setForm] = useState(item);
-  return (
-    <div className="glass p-6 border border-[#2563EB]/30 rounded-2xl">
-      <h3 className="text-sm font-bold text-white mb-4">{item.id ? "Modifier le témoignage" : "Nouveau témoignage"}</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Input label="Nom" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-        <Input label="Rôle / Entreprise" value={form.role} onChange={(v) => setForm({ ...form, role: v })} />
-        <div className="sm:col-span-2">
-          <Textarea label="Citation" value={form.quote} onChange={(v) => setForm({ ...form, quote: v })} />
-        </div>
-      </div>
-      <div className="flex gap-2 mt-5">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Check size={14} /> Enregistrer
-        </button>
-        <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-4 py-2.5 text-sm text-white/50 hover:text-white transition-colors">
-          <X size={14} /> Annuler
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── FAQs Tab ───────────────────────────────────────────────
-
-function FaqsTab() {
-  const [items, setItems] = useState<FAQ[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<FAQ | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try { setItems(await getFaqs()); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  function startCreate() {
-    setIsCreating(true);
-    setEditing({ question: "", answer: "", sort_order: items.length + 1 });
-  }
-
-  async function handleSave(f: FAQ) {
-    try { await upsertFaq(f); await load(); setEditing(null); setIsCreating(false); } catch (e) { console.error(e); }
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer cette FAQ ?")) return;
-    await deleteFaq(id);
-    setItems((prev) => prev.filter((f) => f.id !== id));
-  }
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Foire aux Questions</h1>
-          <p className="text-sm text-white/35 mt-1">{items.length} question{items.length !== 1 ? "s" : ""}</p>
-        </div>
-        <button onClick={startCreate} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-colors" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Plus size={15} /> Ajouter
-        </button>
-      </div>
-
-      {editing && <FaqForm item={editing} onSave={handleSave} onCancel={() => { setEditing(null); setIsCreating(false); }} />}
-
-      {items.length === 0 ? (
-        <EmptyState icon={HelpCircle} text="Aucune question" />
-      ) : (
-        <div className="space-y-3">
-          {items.map((f) => (
-            <div key={f.id} className="glass p-5 group hover:border-white/15 transition-all">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-white text-sm">{f.question}</p>
-                  <p className="mt-1 text-xs text-white/40 leading-relaxed line-clamp-2">{f.answer}</p>
-                </div>
-                <div className="flex gap-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setEditing(f)} className="rounded-lg bg-white/5 p-2 text-white/40 hover:text-[#38BDF8] hover:bg-[#38BDF8]/10 transition-colors" title="Modifier">
-                    <Pencil size={13} />
-                  </button>
-                  <button onClick={() => handleDelete(f.id!)} className="rounded-lg bg-red-500/10 p-2 text-red-400 hover:text-red-300 transition-colors" title="Supprimer">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FaqForm({ item, onSave, onCancel }: { item: FAQ; onSave: (f: FAQ) => void; onCancel: () => void }) {
-  const [form, setForm] = useState(item);
-  return (
-    <div className="glass p-6 border border-[#2563EB]/30 rounded-2xl">
-      <h3 className="text-sm font-bold text-white mb-4">{item.id ? "Modifier la question" : "Nouvelle question"}</h3>
-      <div className="space-y-4">
-        <Input label="Question" value={form.question} onChange={(v) => setForm({ ...form, question: v })} />
-        <Textarea label="Réponse" value={form.answer} onChange={(v) => setForm({ ...form, answer: v })} />
-      </div>
-      <div className="flex gap-2 mt-5">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Check size={14} /> Enregistrer
-        </button>
-        <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-4 py-2.5 text-sm text-white/50 hover:text-white transition-colors">
-          <X size={14} /> Annuler
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Portfolio Tab ──────────────────────────────────────────
-
-function PortfolioTab() {
-  const [items, setItems] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Project | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try { setItems(await getProjects()); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-  useEffect(() => { load(); }, []);
-
-  function startCreate() {
-    setIsCreating(true);
-    setEditing({ title: "", category: "", description: "", image_url: "", link_url: "", sort_order: items.length + 1 });
-  }
-
-  async function handleSave(p: Project) {
-    try { await upsertProject(p); await load(); setEditing(null); setIsCreating(false); } catch (e) { console.error(e); }
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Supprimer ce projet ?")) return;
-    await deleteProject(id);
-    setItems((prev) => prev.filter((p) => p.id !== id));
-  }
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Portfolio</h1>
-          <p className="text-sm text-white/35 mt-1">{items.length} projet{items.length !== 1 ? "s" : ""}</p>
-        </div>
-        <button onClick={startCreate} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-colors" style={{ background: "linear-gradient(135deg, #10B981, #34D399)" }}>
-          <Plus size={15} /> Nouveau projet
-        </button>
-      </div>
-
-      {editing && <ProjectForm item={editing} onSave={handleSave} onCancel={() => { setEditing(null); setIsCreating(false); }} />}
-
-      {items.length === 0 ? (
-        <EmptyState icon={Image} text="Aucun projet" />
-      ) : (
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((p) => (
-            <div key={p.id} className="glass overflow-hidden group hover:border-white/15 transition-all">
-              <div className="relative aspect-[4/3] overflow-hidden bg-white/[0.03]">
-                {p.image_url ? (
-                  <img src={p.image_url} alt={p.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
-                ) : (
-                  <div className="flex h-full items-center justify-center">
-                    <Image size={32} className="text-white/10" />
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent opacity-60" />
-                {/* Overlay actions */}
-                <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/40">
-                  <button onClick={() => setEditing(p)} className="flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#1d4ed8] transition-colors shadow-lg">
-                    <Pencil size={13} /> Modifier
-                  </button>
-                  {p.link_url && (
-                    <a href={p.link_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl bg-white/10 backdrop-blur-sm px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/20 transition-colors shadow-lg">
-                      <ExternalLink size={13} /> Voir
-                    </a>
+        shown.map((m) => (
+          <article
+            key={m.id}
+            className="glass p-5"
+            style={{
+              borderLeft: `3px solid ${m.read ? "transparent" : "#38BDF8"}`,
+            }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="font-semibold text-white">
+                  {m.name}
+                  {!m.read && (
+                    <span className="ml-2 rounded-full bg-[#38BDF8] px-2 py-0.5 text-[10px] font-bold text-[#050816]">
+                      nouveau
+                    </span>
                   )}
-                </div>
+                </p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-white/40">
+                  <a
+                    href={`mailto:${m.email}`}
+                    className="hover:text-[color:var(--brand-2)]"
+                  >
+                    {m.email}
+                  </a>
+                  {m.company && <span>{m.company}</span>}
+                  <span>{new Date(m.created_at).toLocaleString("fr-FR")}</span>
+                </p>
               </div>
-              <div className="p-5">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#38BDF8]">{p.category}</p>
-                  <button onClick={() => handleDelete(p.id!)} className="rounded-lg bg-red-500/10 p-1.5 text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition-all" title="Supprimer">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-                <h3 className="font-bold text-white text-sm">{p.title}</h3>
-                <p className="mt-1 text-xs text-white/35 leading-relaxed line-clamp-2">{p.description}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    run(
+                      () =>
+                        setMessageReadFn({ data: { id: m.id, read: !m.read } }),
+                      "Statut mis à jour",
+                    )
+                  }
+                  className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+                >
+                  <Eye size={13} className="mr-1 inline" />
+                  {m.read ? "Marquer non lu" : "Marquer lu"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("Supprimer ce message ?")) {
+                      run(
+                        () => deleteMessageFn({ data: { id: m.id } }),
+                        "Message supprimé",
+                      );
+                    }
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-xs text-red-400/70 transition hover:bg-red-500/10 hover:text-red-400"
+                >
+                  <Trash2 size={13} className="mr-1 inline" />
+                  Supprimer
+                </button>
               </div>
             </div>
-          ))}
-        </div>
+            <p className="mt-4 whitespace-pre-wrap border-t border-white/5 pt-4 text-sm leading-relaxed text-white/70">
+              {m.message}
+            </p>
+          </article>
+        ))
       )}
     </div>
   );
 }
 
-function ProjectForm({ item, onSave, onCancel }: { item: Project; onSave: (p: Project) => void; onCancel: () => void }) {
-  const [form, setForm] = useState(item);
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+// ─── Projets ──────────────────────────────────────────────
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const fileName = `project-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("projects").upload(fileName, file, { upsert: true });
-      if (error) throw error;
-      const { data } = supabase.storage.from("projects").getPublicUrl(fileName);
-      setForm((prev) => ({ ...prev, image_url: data.publicUrl }));
-    } catch (err) {
-      console.error("Upload error:", err);
-      alert("Erreur lors de l'upload. Vérifiez que le bucket 'projects' existe dans Supabase Storage.");
+const EMPTY_PROJECT = {
+  id: null as number | null,
+  title: "",
+  category: "",
+  description: "",
+  image_url: "",
+  link_url: "",
+  sort_order: 0,
+};
+
+function Projects({
+  content,
+  run,
+}: {
+  content: Awaited<ReturnType<typeof getAdminContentFn>>;
+  run: RunFn;
+}) {
+  const [editing, setEditing] = useState<typeof EMPTY_PROJECT | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const rows = content.projects;
+  const isFallback = rows.length === 0;
+
+  async function handleUpload(file: File) {
+    if (!editing) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const mb = (file.size / 1024 / 1024).toFixed(1);
+      setUploadError(
+        `${file.name} fait ${mb} Mo — la limite est ${MAX_MB} Mo.`,
+      );
+      return;
     }
+    setUploadError(null);
+    setUploading(true);
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () =>
+        reject(new Error("Lecture du fichier impossible."));
+      reader.readAsDataURL(file);
+    });
+    const ok = await run(
+      () =>
+        uploadImageFn({
+          data: { filename: file.name, contentType: file.type, base64 },
+        }).then((res) => {
+          setEditing((current) =>
+            current ? { ...current, image_url: res.url } : current,
+          );
+        }),
+      "Image envoyée",
+    );
+    if (!ok) setUploading(false);
     setUploading(false);
   }
 
   return (
-    <div className="glass p-6 border border-[#2563EB]/30 rounded-2xl">
-      <h3 className="text-sm font-bold text-white mb-4">{item.id ? "Modifier le projet" : "Nouveau projet"}</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Input label="Titre du projet" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
-        <Input label="Catégorie" value={form.category} onChange={(v) => setForm({ ...form, category: v })} placeholder="ex: SaaS · Analytique" />
-        <div className="sm:col-span-2">
-          <Textarea label="Description" value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
-        </div>
-        <Input label="Lien du projet (optionnel)" value={form.link_url} onChange={(v) => setForm({ ...form, link_url: v })} placeholder="https://..." />
-      </div>
-
-      <div className="mt-4">
-        <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Image du projet</label>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-5 py-3 text-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-          >
-            {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-            {uploading ? "Upload en cours…" : "Choisir une image"}
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-          {form.image_url && (
-            <button type="button" onClick={() => setForm((prev) => ({ ...prev, image_url: "" }))} className="text-xs text-red-400 hover:text-red-300 transition-colors">
-              Supprimer l'image
-            </button>
-          )}
-        </div>
-        <div className="mt-3">
-          <Input label="Ou collez une URL" value={form.image_url} onChange={(v) => setForm({ ...form, image_url: v })} placeholder="https://..." />
-        </div>
-      </div>
-
-      {form.image_url && (
-        <div className="mt-4 rounded-xl overflow-hidden aspect-[4/3] max-w-xs border border-white/10">
-          <img src={form.image_url} alt="Aperçu" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+    <div className="space-y-6">
+      {isFallback && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200/80">
+          Aucun projet en base — le site affiche les 3 projets de{" "}
+          <code>src/data/site.ts</code>. Ajoutez un projet pour qu'il prenne le
+          dessus.
         </div>
       )}
-      <div className="flex gap-2 mt-5">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}>
-          <Check size={14} /> Enregistrer
+
+      <div className="flex justify-end">
+        <button
+          onClick={() =>
+            setEditing({ ...EMPTY_PROJECT, sort_order: rows.length + 1 })
+          }
+          className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+        >
+          <Plus size={16} /> Nouveau projet
         </button>
-        <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-4 py-2.5 text-sm text-white/50 hover:text-white transition-colors">
-          <X size={14} /> Annuler
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map((project, index) => (
+          <article key={project.id} className="glass overflow-hidden">
+            <div className="relative aspect-[4/3] bg-white/[0.03]">
+              {project.image_url ? (
+                <img
+                  src={project.image_url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <ImageIcon size={32} className="text-white/10" />
+                </div>
+              )}
+              <span className="absolute left-3 top-3 rounded-lg bg-black/60 px-2 py-1 text-[10px] font-bold text-white/70">
+                #{index + 1}
+              </span>
+            </div>
+            <div className="p-4">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--brand-2)]">
+                {project.category}
+              </p>
+              <h3 className="mt-1 font-bold text-white">{project.title}</h3>
+              <p className="mt-1 line-clamp-2 text-xs text-white/40">
+                {project.description}
+              </p>
+              <div className="mt-4 flex items-center justify-between">
+                <div className="flex gap-1">
+                  <IconButton
+                    icon={ArrowUp}
+                    label="Monter"
+                    disabled={index === 0}
+                    onClick={() =>
+                      move(rows, index, index - 1, "projects", run)
+                    }
+                  />
+                  <IconButton
+                    icon={ArrowDown}
+                    label="Descendre"
+                    disabled={index === rows.length - 1}
+                    onClick={() =>
+                      move(rows, index, index + 1, "projects", run)
+                    }
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      setEditing({
+                        id: project.id,
+                        title: project.title,
+                        category: project.category,
+                        description: project.description,
+                        image_url: project.image_url,
+                        link_url: project.link_url,
+                        sort_order: project.sort_order,
+                      })
+                    }
+                    className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+                  >
+                    <Pencil size={13} className="mr-1 inline" />
+                    Éditer
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Supprimer « ${project.title} » ?`)) {
+                        run(
+                          () => deleteProjectFn({ data: { id: project.id } }),
+                          "Projet supprimé",
+                        );
+                      }
+                    }}
+                    className="rounded-lg px-3 py-1.5 text-xs text-red-400/70 hover:bg-red-500/10 hover:text-red-400"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {editing && (
+        <ProjectModal
+          value={editing}
+          uploading={uploading}
+          uploadError={uploadError}
+          onUpload={handleUpload}
+          onClose={() => {
+            setEditing(null);
+            setUploadError(null);
+          }}
+          onSave={async (value) => {
+            const ok = await run(
+              () => saveProjectFn({ data: value }),
+              "Projet enregistré",
+            );
+            if (ok) setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProjectModal({
+  value,
+  uploading,
+  uploadError,
+  onUpload,
+  onClose,
+  onSave,
+}: {
+  value: typeof EMPTY_PROJECT;
+  uploading: boolean;
+  uploadError: string | null;
+  onUpload: (file: File) => void;
+  onClose: () => void;
+  onSave: (value: typeof EMPTY_PROJECT) => void;
+}) {
+  const [form, setForm] = useState(value);
+  const set = <K extends keyof typeof EMPTY_PROJECT>(
+    key: K,
+    v: (typeof EMPTY_PROJECT)[K],
+  ) => setForm((f) => ({ ...f, [key]: v }));
+
+  return (
+    <Modal
+      title={value.id ? "Modifier le projet" : "Nouveau projet"}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <Field
+          label="Titre"
+          value={form.title}
+          onChange={(v) => set("title", v)}
+          required
+        />
+        <Field
+          label="Catégorie"
+          value={form.category}
+          onChange={(v) => set("category", v)}
+          placeholder="SaaS · Analytique"
+        />
+        <Textarea
+          label="Description"
+          value={form.description}
+          onChange={(v) => set("description", v)}
+        />
+
+        <div>
+          <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+            Image
+          </label>
+          {form.image_url && (
+            <img
+              src={form.image_url}
+              alt=""
+              className="mb-3 h-32 w-full rounded-xl object-cover"
+            />
+          )}
+          <div className="flex gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onUpload(file);
+              }}
+              className="hidden"
+              id="project-image"
+            />
+            <label
+              htmlFor="project-image"
+              className="btn-ghost flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-white/70 hover:text-white"
+            >
+              {uploading ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <ImageIcon size={15} />
+              )}
+              {uploading ? "Envoi…" : "Choisir un fichier"}
+            </label>
+            <input
+              value={form.image_url}
+              onChange={(e) => set("image_url", e.target.value)}
+              placeholder="…ou collez une URL https://"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 focus:border-[color:var(--brand-2)] focus:outline-none"
+            />
+          </div>
+          <p className="mt-2 text-xs text-white/25">
+            JPEG, PNG, WebP, AVIF ou GIF — {MAX_MB} Mo maximum. L'envoi de
+            fichier nécessite Vercel Blob ; sans lui, collez une URL.
+          </p>
+          {uploadError && (
+            <p className="mt-2 text-xs text-red-300/90">{uploadError}</p>
+          )}
+        </div>
+
+        <Field
+          label="Lien externe"
+          value={form.link_url}
+          onChange={(v) => set("link_url", v)}
+          placeholder="https://…"
+        />
+
+        <ModalActions onClose={onClose} onSave={() => onSave(form)} />
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Services ─────────────────────────────────────────────
+
+const ICON_CHOICES = [
+  "Code2",
+  "Brain",
+  "BarChart3",
+  "Zap",
+  "Rocket",
+  "Shield",
+  "Headphones",
+  "Globe",
+  "Wrench",
+  "Compass",
+  "Mail",
+  "Phone",
+  "MapPin",
+  "Award",
+  "Users",
+  "TrendingUp",
+  "Star",
+];
+
+const EMPTY_SERVICE = {
+  id: null as number | null,
+  title: "",
+  description: "",
+  icon: "Code2",
+  color: "#2563EB",
+  sort_order: 0,
+};
+
+function ServicesAdmin({
+  rows,
+  run,
+}: {
+  rows: Awaited<ReturnType<typeof getAdminContentFn>>["services"];
+  run: RunFn;
+}) {
+  const [editing, setEditing] = useState<typeof EMPTY_SERVICE | null>(null);
+  const isFallback = rows.length === 0;
+
+  return (
+    <div className="space-y-6">
+      {isFallback && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200/80">
+          Aucun service en base — le site affiche les {fallbackServices.length}{" "}
+          services de <code>src/data/site.ts</code>.
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={() =>
+            setEditing({ ...EMPTY_SERVICE, sort_order: rows.length + 1 })
+          }
+          className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+        >
+          <Plus size={16} /> Nouveau service
         </button>
+      </div>
+
+      <div className="space-y-3">
+        {rows.map((row, index) => (
+          <div key={row.id} className="glass flex items-center gap-4 p-4">
+            <div
+              className="h-10 w-10 shrink-0 rounded-xl"
+              style={{
+                background: `${row.color}22`,
+                border: `1px solid ${row.color}44`,
+              }}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-white">{row.title}</p>
+              <p className="truncate text-xs text-white/40">
+                {row.description}
+              </p>
+            </div>
+            <code className="hidden rounded-lg bg-white/5 px-2 py-1 text-[10px] text-white/40 sm:block">
+              {row.icon} · #{index + 1}
+            </code>
+            <div className="flex items-center gap-1">
+              <IconButton
+                icon={ArrowUp}
+                label="Monter"
+                disabled={index === 0}
+                onClick={() => move(rows, index, index - 1, "services", run)}
+              />
+              <IconButton
+                icon={ArrowDown}
+                label="Descendre"
+                disabled={index === rows.length - 1}
+                onClick={() => move(rows, index, index + 1, "services", run)}
+              />
+              <button
+                onClick={() =>
+                  setEditing({
+                    id: row.id,
+                    title: row.title,
+                    description: row.description,
+                    icon: row.icon,
+                    color: row.color,
+                    sort_order: row.sort_order,
+                  })
+                }
+                className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm(`Supprimer « ${row.title} » ?`)) {
+                    run(
+                      () => deleteServiceFn({ data: { id: row.id } }),
+                      "Service supprimé",
+                    );
+                  }
+                }}
+                className="rounded-lg px-3 py-1.5 text-xs text-red-400/70 hover:bg-red-500/10 hover:text-red-400"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Modal
+          title={editing.id ? "Modifier le service" : "Nouveau service"}
+          onClose={() => setEditing(null)}
+        >
+          <div className="space-y-4">
+            <Field
+              label="Titre"
+              value={editing.title}
+              onChange={(v) => setEditing({ ...editing, title: v })}
+              required
+            />
+            <Textarea
+              label="Description"
+              value={editing.description}
+              onChange={(v) => setEditing({ ...editing, description: v })}
+            />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+                  Icône
+                </label>
+                <select
+                  value={editing.icon}
+                  onChange={(e) =>
+                    setEditing({ ...editing, icon: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#0a0f1e] px-4 py-2.5 text-sm text-white focus:border-[color:var(--brand-2)] focus:outline-none"
+                >
+                  {ICON_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {choice}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+                  Couleur
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    value={editing.color}
+                    onChange={(e) =>
+                      setEditing({ ...editing, color: e.target.value })
+                    }
+                    className="h-10 w-14 cursor-pointer rounded-lg border border-white/10 bg-transparent"
+                  />
+                  <input
+                    value={editing.color}
+                    onChange={(e) =>
+                      setEditing({ ...editing, color: e.target.value })
+                    }
+                    className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm text-white focus:border-[color:var(--brand-2)] focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+            <ModalActions
+              onClose={() => setEditing(null)}
+              onSave={async () => {
+                const ok = await run(
+                  () => saveServiceFn({ data: editing }),
+                  "Service enregistré",
+                );
+                if (ok) setEditing(null);
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Témoignages ───────────────────────────────────────────
+
+const EMPTY_TESTIMONIAL = {
+  id: null as number | null,
+  name: "",
+  role: "",
+  quote: "",
+  sort_order: 0,
+};
+
+function TestimonialsAdmin({
+  rows,
+  run,
+}: {
+  rows: Awaited<ReturnType<typeof getAdminContentFn>>["testimonials"];
+  run: RunFn;
+}) {
+  const [editing, setEditing] = useState<typeof EMPTY_TESTIMONIAL | null>(null);
+  const isFallback = rows.length === 0;
+
+  return (
+    <div className="space-y-6">
+      {isFallback && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200/80">
+          Aucun témoignage en base — le site affiche ceux de{" "}
+          <code>src/data/site.ts</code>.
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={() =>
+            setEditing({ ...EMPTY_TESTIMONIAL, sort_order: rows.length + 1 })
+          }
+          className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+        >
+          <Plus size={16} /> Nouveau témoignage
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {rows.map((row, index) => (
+          <div key={row.id} className="glass p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="font-semibold text-white">{row.name}</p>
+                <p className="text-xs text-white/40">{row.role || "—"}</p>
+                <p className="mt-3 border-l-2 border-[color:var(--brand-2)] pl-4 text-sm italic text-white/60">
+                  « {row.quote} »
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <IconButton
+                  icon={ArrowUp}
+                  label="Monter"
+                  disabled={index === 0}
+                  onClick={() =>
+                    move(rows, index, index - 1, "testimonials", run)
+                  }
+                />
+                <IconButton
+                  icon={ArrowDown}
+                  label="Descendre"
+                  disabled={index === rows.length - 1}
+                  onClick={() =>
+                    move(rows, index, index + 1, "testimonials", run)
+                  }
+                />
+                <button
+                  onClick={() =>
+                    setEditing({
+                      id: row.id,
+                      name: row.name,
+                      role: row.role,
+                      quote: row.quote,
+                      sort_order: row.sort_order,
+                    })
+                  }
+                  className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Supprimer le témoignage de ${row.name} ?`)) {
+                      run(
+                        () => deleteTestimonialFn({ data: { id: row.id } }),
+                        "Témoignage supprimé",
+                      );
+                    }
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-xs text-red-400/70 hover:bg-red-500/10 hover:text-red-400"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Modal
+          title={editing.id ? "Modifier le témoignage" : "Nouveau témoignage"}
+          onClose={() => setEditing(null)}
+        >
+          <div className="space-y-4">
+            <Field
+              label="Nom"
+              value={editing.name}
+              onChange={(v) => setEditing({ ...editing, name: v })}
+              required
+            />
+            <Field
+              label="Fonction / Société"
+              value={editing.role}
+              onChange={(v) => setEditing({ ...editing, role: v })}
+              placeholder="PDG, Sonatrach Digital"
+            />
+            <Textarea
+              label="Citation"
+              value={editing.quote}
+              onChange={(v) => setEditing({ ...editing, quote: v })}
+              rows={5}
+            />
+            <ModalActions
+              onClose={() => setEditing(null)}
+              onSave={async () => {
+                const ok = await run(
+                  () => saveTestimonialFn({ data: editing }),
+                  "Témoignage enregistré",
+                );
+                if (ok) setEditing(null);
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── FAQ ──────────────────────────────────────────────────
+
+const EMPTY_FAQ = {
+  id: null as number | null,
+  question: "",
+  answer: "",
+  sort_order: 0,
+};
+
+function FaqsAdmin({
+  rows,
+  run,
+}: {
+  rows: Awaited<ReturnType<typeof getAdminContentFn>>["faqs"];
+  run: RunFn;
+}) {
+  const [editing, setEditing] = useState<typeof EMPTY_FAQ | null>(null);
+  const isFallback = rows.length === 0;
+
+  return (
+    <div className="space-y-6">
+      {isFallback && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200/80">
+          Aucune FAQ en base — le site affiche les {fallbackFaqs.length}{" "}
+          questions de <code>src/data/site.ts</code>.
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={() =>
+            setEditing({ ...EMPTY_FAQ, sort_order: rows.length + 1 })
+          }
+          className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+        >
+          <Plus size={16} /> Nouvelle question
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {rows.map((row, index) => (
+          <div key={row.id} className="glass p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="font-semibold text-white">
+                  <span className="mr-2 text-white/25">{index + 1}.</span>
+                  {row.question}
+                </p>
+                <p className="mt-2 text-sm text-white/50">{row.answer}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <IconButton
+                  icon={ArrowUp}
+                  label="Monter"
+                  disabled={index === 0}
+                  onClick={() => move(rows, index, index - 1, "faqs", run)}
+                />
+                <IconButton
+                  icon={ArrowDown}
+                  label="Descendre"
+                  disabled={index === rows.length - 1}
+                  onClick={() => move(rows, index, index + 1, "faqs", run)}
+                />
+                <button
+                  onClick={() =>
+                    setEditing({
+                      id: row.id,
+                      question: row.question,
+                      answer: row.answer,
+                      sort_order: row.sort_order,
+                    })
+                  }
+                  className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("Supprimer cette question ?")) {
+                      run(
+                        () => deleteFaqFn({ data: { id: row.id } }),
+                        "Question supprimée",
+                      );
+                    }
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-xs text-red-400/70 hover:bg-red-500/10 hover:text-red-400"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Modal
+          title={editing.id ? "Modifier la question" : "Nouvelle question"}
+          onClose={() => setEditing(null)}
+        >
+          <div className="space-y-4">
+            <Field
+              label="Question"
+              value={editing.question}
+              onChange={(v) => setEditing({ ...editing, question: v })}
+              required
+            />
+            <Textarea
+              label="Réponse"
+              value={editing.answer}
+              onChange={(v) => setEditing({ ...editing, answer: v })}
+              rows={5}
+            />
+            <p className="text-xs text-white/25">
+              La FAQ alimente aussi les données structurées schema.org (bon pour
+              le référencement Google).
+            </p>
+            <ModalActions
+              onClose={() => setEditing(null)}
+              onSave={async () => {
+                const ok = await run(
+                  () => saveFaqFn({ data: editing }),
+                  "Question enregistrée",
+                );
+                if (ok) setEditing(null);
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Coordonnées ──────────────────────────────────────────
+
+const SETTING_FIELDS: Array<{
+  key: string;
+  label: string;
+  icon: typeof Mail;
+  type: string;
+  placeholder: string;
+}> = [
+  {
+    key: "email",
+    label: "Email de réception",
+    icon: Mail,
+    type: "email",
+    placeholder: "contact@exemple.com",
+  },
+  {
+    key: "phone",
+    label: "Téléphone (affiché)",
+    icon: Phone,
+    type: "tel",
+    placeholder: "+212 6 00 00 00 00",
+  },
+  {
+    key: "phone_raw",
+    label: "Téléphone (lien tel:)",
+    icon: Phone,
+    type: "tel",
+    placeholder: "+212600000000",
+  },
+  {
+    key: "whatsapp",
+    label: "Lien WhatsApp",
+    icon: Globe,
+    type: "url",
+    placeholder: "https://wa.me/212…",
+  },
+  {
+    key: "address",
+    label: "Adresse",
+    icon: MapPin,
+    type: "text",
+    placeholder: "Khenifra, Maroc",
+  },
+  {
+    key: "hours",
+    label: "Horaires",
+    icon: Clock,
+    type: "text",
+    placeholder: "Lun – Ven · 9h00 – 19h00",
+  },
+  {
+    key: "facebook",
+    label: "Facebook",
+    icon: Globe,
+    type: "url",
+    placeholder: "https://facebook.com/…",
+  },
+  {
+    key: "instagram",
+    label: "Instagram",
+    icon: Globe,
+    type: "url",
+    placeholder: "https://instagram.com/…",
+  },
+  {
+    key: "site_description",
+    label: "Description (pied de page + SEO)",
+    icon: FileCode,
+    type: "text",
+    placeholder: "Solutions numériques et IA premium…",
+  },
+];
+
+function SettingsAdmin({
+  settings,
+  run,
+}: {
+  settings: Record<string, string>;
+  run: RunFn;
+}) {
+  const [form, setForm] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const field of SETTING_FIELDS)
+      initial[field.key] = settings[field.key] ?? "";
+    return initial;
+  });
+
+  const dirty = SETTING_FIELDS.some(
+    (f) => (form[f.key] ?? "") !== (settings[f.key] ?? ""),
+  );
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div className="rounded-xl border border-[#38BDF8]/20 bg-[#38BDF8]/5 p-4 text-sm text-white/60">
+        Ces informations remplacent celles de{" "}
+        <code className="text-[color:var(--brand-2)]">src/data/site.ts</code>.
+        Laissez un champ vide pour garder la valeur du fichier.
+      </div>
+
+      <div className="space-y-4">
+        {SETTING_FIELDS.map((field) => (
+          <div key={field.key}>
+            <label className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+              <field.icon size={13} /> {field.label}
+            </label>
+            <input
+              type={field.type}
+              value={form[field.key] ?? ""}
+              placeholder={field.placeholder}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, [field.key]: e.target.value }))
+              }
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 focus:border-[color:var(--brand-2)] focus:outline-none"
+            />
+          </div>
+        ))}
+      </div>
+
+      <button
+        disabled={!dirty}
+        onClick={() =>
+          run(
+            () => saveSettingsFn({ data: { settings: form } }),
+            "Coordonnées enregistrées",
+          )
+        }
+        className="btn-primary flex items-center gap-2 rounded-xl px-6 py-3 font-semibold disabled:opacity-40"
+      >
+        <Save size={16} /> {dirty ? "Enregistrer" : "Aucune modification"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Composants utilitaires ────────────────────────────────
+
+function move<T extends { id: number }>(
+  rows: T[],
+  from: number,
+  to: number,
+  table: string,
+  run: RunFn,
+) {
+  if (to < 0 || to >= rows.length) return;
+  const ids = rows.map((r) => r.id);
+  const [moved] = ids.splice(from, 1);
+  ids.splice(to, 0, moved);
+  return run(() => reorderFn({ data: { table, ids } }), "Ordre mis à jour");
+}
+
+function IconButton({
+  icon: Icon,
+  label,
+  disabled,
+  onClick,
+}: {
+  icon: typeof ArrowUp;
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className="rounded-lg p-2 text-white/40 transition hover:bg-white/10 hover:text-white disabled:opacity-20 disabled:hover:bg-transparent"
+    >
+      <Icon size={13} />
+    </button>
+  );
+}
+
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+      <div
+        className="glass-white-strong my-8 w-full max-w-lg rounded-2xl p-6"
+        style={{ background: "rgba(10,15,30,0.98)" }}
+      >
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white">{title}</h2>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-white/40 hover:bg-white/10 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {children}
       </div>
     </div>
   );
 }
 
-// ─── Shared Components ──────────────────────────────────────
+function ModalActions({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-3 border-t border-white/5 pt-4">
+      <button
+        onClick={onClose}
+        className="btn-ghost rounded-xl px-5 py-2.5 text-sm text-white/60 hover:text-white"
+      >
+        Annuler
+      </button>
+      <button
+        onClick={onSave}
+        className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold"
+      >
+        <Save size={15} /> Enregistrer
+      </button>
+    </div>
+  );
+}
 
-function Input({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+}) {
   return (
     <div>
-      <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/20 transition focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20" />
+      <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+        {label}
+      </label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        required={required}
+        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 focus:border-[color:var(--brand-2)] focus:outline-none"
+      />
     </div>
   );
 }
 
-function Textarea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Textarea({
+  label,
+  value,
+  onChange,
+  rows = 3,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+}) {
   return (
     <div>
-      <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">{label}</label>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
-        className="w-full rounded-xl bg-white/[0.04] border border-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/20 transition focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 resize-none" />
+      <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+        {label}
+      </label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        className="w-full resize-y rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-white/25 focus:border-[color:var(--brand-2)] focus:outline-none"
+      />
     </div>
   );
 }
 
-function LoadingState() {
+function EmptyState({
+  icon: Icon,
+  title,
+  text,
+}: {
+  icon: typeof Mail;
+  title: string;
+  text: string;
+}) {
   return (
-    <div className="flex items-center justify-center py-24">
-      <div className="flex flex-col items-center gap-3">
-        <Loader2 size={28} className="animate-spin text-[#38BDF8]" />
-        <p className="text-xs text-white/30">Chargement…</p>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon, text }: { icon: typeof MessageSquare; text: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.03] mb-4">
-        <Icon size={28} className="text-white/10" />
-      </div>
-      <p className="text-sm text-white/30">{text}</p>
+    <div className="glass flex flex-col items-center gap-3 py-20 text-center">
+      <Icon size={36} className="text-white/10" />
+      <p className="font-semibold text-white/70">{title}</p>
+      <p className="max-w-sm text-sm text-white/30">{text}</p>
     </div>
   );
 }
