@@ -201,7 +201,7 @@ function Landing() {
         }}
       />
       <BackgroundFX />
-      <Navbar />
+      <Navbar projectsCount={projects.length} />
       <main>
         <Hero />
         <StatsBar />
@@ -287,7 +287,7 @@ function Particles() {
 }
 
 /* ---------------- Navbar ---------------- */
-function Navbar() {
+function Navbar({ projectsCount }: { projectsCount: number }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -319,6 +319,11 @@ function Navbar() {
               className="text-sm font-medium text-white/60 transition hover:text-white relative group"
             >
               {n.label}
+              {n.href === "#portfolio" && projectsCount > 0 && (
+                <span className="ml-1.5 rounded-full bg-[color:var(--brand-2)]/15 px-1.5 py-0.5 text-[10px] font-bold text-[color:var(--brand-2)] ring-1 ring-[color:var(--brand-2)]/30">
+                  {projectsCount}
+                </span>
+              )}
               <span className="absolute -bottom-1 left-0 h-px w-0 bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] transition-all duration-300 group-hover:w-full" />
             </a>
           ))}
@@ -332,8 +337,13 @@ function Navbar() {
           </a>
           <button
             onClick={() => setOpen(!open)}
-            className="md:hidden rounded-xl p-2 text-white btn-ghost"
+            className="md:hidden rounded-xl p-2 text-white btn-ghost relative"
           >
+            {projectsCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--brand-2)] text-[9px] font-bold text-black ring-1 ring-white/20">
+                {projectsCount}
+              </span>
+            )}
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
@@ -352,9 +362,14 @@ function Navbar() {
                   key={n.href}
                   href={n.href}
                   onClick={() => setOpen(false)}
-                  className="py-2 text-white/70 hover:text-white transition-colors text-lg"
+                  className="py-2 text-white/70 hover:text-white transition-colors text-lg flex items-center gap-2"
                 >
                   {n.label}
+                  {n.href === "#portfolio" && projectsCount > 0 && (
+                    <span className="rounded-full bg-[color:var(--brand-2)]/15 px-1.5 py-0.5 text-[10px] font-bold text-[color:var(--brand-2)] ring-1 ring-[color:var(--brand-2)]/30">
+                      {projectsCount}
+                    </span>
+                  )}
                 </a>
               ))}
               <a
@@ -941,8 +956,8 @@ function Portfolio({ items }: { items: Project[] }) {
     <section id="portfolio" className="relative z-10 py-28">
       <div className="mx-auto max-w-7xl px-6">
         <SectionHeader
-          eyebrow="Études de cas"
-          title="Projets Sélectionnés"
+          eyebrow="Nos réalisations"
+          title={`Projets Sélectionnés — ${items.length}`}
           subtitle="Un aperçu des systèmes que nous avons livrés à nos clients premium."
         />
         <motion.div
@@ -988,6 +1003,11 @@ function Portfolio({ items }: { items: Project[] }) {
                   </div>
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-[#050816]/20 to-transparent" />
+                {p.link && (
+                  <span className="absolute right-3 top-3 z-10 rounded-full bg-[#050816]/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white ring-1 ring-white/20 backdrop-blur">
+                    Lien disponible
+                  </span>
+                )}
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-500 group-hover:opacity-100">
                   <div
                     className="flex h-14 w-14 items-center justify-center rounded-full backdrop-blur-md"
@@ -1040,12 +1060,20 @@ function Portfolio({ items }: { items: Project[] }) {
             {/* Image */}
             {selected.img && (
               <div className="relative aspect-[16/9] overflow-hidden rounded-t-3xl">
-                <img
-                  src={selected.img}
-                  alt={selected.title}
-                  className="h-full w-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent" />
+                <a
+                  href={selected.img}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="block cursor-zoom-in"
+                >
+                  <img
+                    src={selected.img}
+                    alt={selected.title}
+                    className="h-full w-full object-cover transition duration-300 hover:scale-[1.01]"
+                  />
+                </a>
+                <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent pointer-events-none" />
               </div>
             )}
 
@@ -1062,7 +1090,7 @@ function Portfolio({ items }: { items: Project[] }) {
               </p>
 
               <div className="mt-8 flex gap-3">
-                {selected.link && (
+                {selected.link ? (
                   <a
                     href={selected.link}
                     target="_blank"
@@ -1072,8 +1100,12 @@ function Portfolio({ items }: { items: Project[] }) {
                       background: "linear-gradient(135deg, #2563EB, #38BDF8)",
                     }}
                   >
-                    <ExternalLink size={16} /> Voir le projet
+                    <ExternalLink size={16} /> Visiter le site
                   </a>
+                ) : (
+                  <span className="text-sm text-white/30">
+                    Aucun lien disponible pour ce projet
+                  </span>
                 )}
                 <button
                   onClick={() => setSelected(null)}
