@@ -332,6 +332,23 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
     window.addEventListener("scroll", on);
     return () => window.removeEventListener("scroll", on);
   }, []);
+
+  // Referme le menu mobile : avec Échap, et au passage en affichage large
+  // (sinon il resterait ouvert, invisible, une fois le breakpoint md franchi).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onWide = () => mq.matches && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    mq.addEventListener("change", onWide);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      mq.removeEventListener("change", onWide);
+    };
+  }, [open]);
   return (
     <motion.header
       initial={{ y: -40, opacity: 0 }}
@@ -387,8 +404,12 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
             Demander un devis
           </a>
           <button
-            onClick={() => setOpen(!open)}
-            className="md:hidden rounded-xl p-2 text-white btn-ghost relative"
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            className="btn-ghost relative flex h-11 w-11 items-center justify-center rounded-xl text-white md:hidden"
           >
             {projectsCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--brand-2)] text-[9px] font-bold text-black ring-1 ring-white/20">
@@ -402,12 +423,15 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="md:hidden overflow-hidden border-t border-white/5 bg-[#050816]/95 backdrop-blur-2xl"
+            key="mobile-nav"
+            id="mobile-nav"
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="border-t border-white/5 bg-[#050816]/98 shadow-[0_24px_48px_rgba(0,0,0,0.5)] backdrop-blur-2xl md:hidden"
           >
-            <div className="mx-auto max-w-7xl px-6 py-5 flex flex-col gap-4">
+            <nav className="mx-auto flex max-w-7xl flex-col gap-1 px-6 py-4">
               {nav.map((n) => (
                 <a
                   key={n.href}
@@ -421,7 +445,7 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
                       scrollToSection(n.href.slice(1)),
                     );
                   }}
-                  className="py-2 text-white/70 hover:text-white transition-colors text-lg flex items-center gap-2"
+                  className="flex items-center gap-2 rounded-lg px-2 py-3 text-lg text-white/70 transition-colors hover:bg-white/5 hover:text-white"
                 >
                   {n.label}
                   {n.href === "#portfolio" && projectsCount > 0 && (
@@ -438,11 +462,11 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
                   setOpen(false);
                   requestAnimationFrame(() => scrollToSection("contact"));
                 }}
-                className="btn-primary rounded-xl px-5 py-3 text-center font-semibold mt-2"
+                className="btn-primary mt-2 rounded-xl px-5 py-3 text-center font-semibold"
               >
                 Demander un devis
               </a>
-            </div>
+            </nav>
           </motion.div>
         )}
       </AnimatePresence>
