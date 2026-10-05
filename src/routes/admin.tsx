@@ -4,7 +4,7 @@ import {
   useRouter,
   redirect,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -645,47 +645,77 @@ function Projects({
 
   const rows = content.projects;
   const isFallback = rows.length === 0;
-  async function handleUpload(
-    file: File,
-    target: "cover" | "gallery" = "cover",
-  ) {
-    if (!editing) return;
+  /** Convertit un fichier en base64, en refusant les fichiers trop lourds. */
+  async function toBase64(file: File): Promise<string> {
     if (file.size > MAX_UPLOAD_BYTES) {
       const mb = (file.size / 1024 / 1024).toFixed(1);
-      setUploadError(
+      throw new Error(
         `${file.name} fait ${mb} Mo — la limite est ${MAX_MB} Mo.`,
       );
-      return;
     }
-    setUploadError(null);
-    setUploading(true);
-    const base64 = await new Promise<string>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
       reader.onerror = () =>
         reject(new Error("Lecture du fichier impossible."));
       reader.readAsDataURL(file);
     });
-    const ok = await run(
-      () =>
-        uploadImageFn({
+  }
+
+  async function handleUpload(file: File, target: "cover" | "gallery") {
+    if (!editing) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const base64 = await toBase64(file);
+      const res = await uploadImageFn({
+        data: { filename: file.name, contentType: file.type, base64 },
+      });
+      setEditing((current) =>
+        current
+          ? target === "cover"
+            ? { ...current, image_url: res.url }
+            : { ...current, gallery_urls: [...current.gallery_urls, res.url] }
+          : current,
+      );
+    } catch (error) {
+      setUploadError(errorMessage(error));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /** Galerie : envoie les fichiers un par un, puis ne rafraîchit qu'une fois. */
+  async function handleGalleryUpload(files: File[]) {
+    if (!editing || files.length === 0) return;
+    setUploadError(null);
+    setUploading(true);
+    const urls: string[] = [];
+    let failure: string | null = null;
+
+    for (const file of files) {
+      try {
+        const base64 = await toBase64(file);
+        const res = await uploadImageFn({
           data: { filename: file.name, contentType: file.type, base64 },
-        }).then((res) => {
-          setEditing((current) =>
-            current
-              ? target === "cover"
-                ? { ...current, image_url: res.url }
-                : {
-                    ...current,
-                    gallery_urls: [...current.gallery_urls, res.url],
-                  }
-              : current,
-          );
-        }),
-      target === "cover" ? "Image envoyée" : "Image ajoutée à la galerie",
-    );
-    if (!ok) setUploading(false);
+        });
+        urls.push(res.url);
+      } catch (error) {
+        failure = errorMessage(error);
+        break;
+      }
+    }
+
+    if (urls.length > 0) {
+      setEditing((current) =>
+        current
+          ? { ...current, gallery_urls: [...current.gallery_urls, ...urls] }
+          : current,
+      );
+    }
+
     setUploading(false);
+    if (failure) setUploadError(failure);
   }
   return (
     <div className="space-y-6">
@@ -808,7 +838,7 @@ function Projects({
           uploading={uploading}
           uploadError={uploadError}
           onUpload={(file) => handleUpload(file, "cover")}
-          onUploadGallery={(file) => handleUpload(file, "gallery")}
+          onUploadGallery={(files) => handleGalleryUpload(files)}
           onClose={() => {
             setEditing(null);
             setUploadError(null);
@@ -854,19 +884,34 @@ function ProjectModal({
   uploading: boolean;
   uploadError: string | null;
   onUpload: (file: File) => void;
-  onUploadGallery: (file: File) => void;
+  onUploadGallery: (files: File[]) => void;
   onClose: () => void;
   onSave: (value: typeof EMPTY_PROJECT) => void;
 }) {
   const [form, setForm] = useState(value);
 
+  // Le parent détient l'état d'édition : les téléversements (cover + galerie)
+  // y arrivent via `value`. Le formulaire local doit donc les refléter, sans
+  // écraser pour autant les modifications faites ici (suppression, URL collée).
+  // → on compare au dernier `value` connu (ref), pas au state local.
+  const lastValue = useRef(value);
   useEffect(() => {
-    setForm((f) =>
-      f.image_url === value.image_url
-        ? f
-        : { ...f, image_url: value.image_url },
-    );
-  }, [value.image_url]);
+    const prev = lastValue.current;
+    const parentChanged =
+      prev.image_url !== value.image_url ||
+      prev.gallery_urls.length !== value.gallery_urls.length ||
+      prev.gallery_urls.some((u, i) => u !== value.gallery_urls[i]);
+
+    if (!parentChanged) return;
+    lastValue.current = value;
+
+    setForm((f) => ({
+      ...f,
+      image_url: value.image_url,
+      gallery_urls: [...value.gallery_urls],
+    }));
+  }, [value]);
+
   const set = <K extends keyof typeof EMPTY_PROJECT>(
     key: K,
     v: (typeof EMPTY_PROJECT)[K],
@@ -1042,9 +1087,8 @@ function ProjectModal({
               multiple
               onChange={(e) => {
                 const files = Array.from(e.target.files ?? []);
-                if (files.length === 0) return;
-                files.forEach((file) => onUploadGallery(file));
                 e.currentTarget.value = "";
+                if (files.length > 0) onUploadGallery(files);
               }}
               className="hidden"
               id="project-gallery"
