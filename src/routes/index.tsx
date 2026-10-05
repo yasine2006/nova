@@ -79,6 +79,28 @@ function scrollToSection(id: string) {
   history.replaceState(null, "", `#${id}`);
 }
 
+/** Lien de section du footer : même navigation que la navbar. */
+function FooterLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        scrollToSection(href.slice(1));
+      }}
+      className="hover:text-white transition-colors"
+    >
+      {children}
+    </a>
+  );
+}
+
 const fadeUp = {
   hidden: { opacity: 0, y: 40, rotateX: 8 },
   show: {
@@ -494,6 +516,10 @@ function Hero() {
           >
             <a
               href="#contact"
+              onClick={(e) => {
+                e.preventDefault();
+                scrollToSection("contact");
+              }}
               className="btn-primary group inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-semibold"
             >
               Démarrer un projet
@@ -504,6 +530,10 @@ function Hero() {
             </a>
             <a
               href="#services"
+              onClick={(e) => {
+                e.preventDefault();
+                scrollToSection("services");
+              }}
               className="btn-white group inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-semibold"
             >
               Découvrir nos services
@@ -1757,6 +1787,10 @@ function CTA() {
             </p>
             <a
               href="#contact"
+              onClick={(e) => {
+                e.preventDefault();
+                scrollToSection("contact");
+              }}
               className="btn-primary mt-10 inline-flex items-center gap-2 rounded-xl px-10 py-4 text-base font-semibold"
             >
               Démarrer votre projet <ArrowRight size={18} />
@@ -2139,25 +2173,13 @@ function Footer({
             </p>
             <ul className="mt-4 space-y-2.5 text-sm text-white/35">
               <li>
-                <a href="#about" className="hover:text-white transition-colors">
-                  À propos
-                </a>
+                <FooterLink href="#about">À propos</FooterLink>
               </li>
               <li>
-                <a
-                  href="#portfolio"
-                  className="hover:text-white transition-colors"
-                >
-                  Portfolio
-                </a>
+                <FooterLink href="#portfolio">Portfolio</FooterLink>
               </li>
               <li>
-                <a
-                  href="#contact"
-                  className="hover:text-white transition-colors"
-                >
-                  Contact
-                </a>
+                <FooterLink href="#contact">Contact</FooterLink>
               </li>
             </ul>
           </div>
@@ -2167,28 +2189,15 @@ function Footer({
             </p>
             <ul className="mt-4 space-y-2.5 text-sm text-white/35">
               <li>
-                <a
-                  href="#services"
-                  className="hover:text-white transition-colors"
-                >
-                  Développement Web
-                </a>
+                <FooterLink href="#services">Développement Web</FooterLink>
               </li>
               <li>
-                <a
-                  href="#services"
-                  className="hover:text-white transition-colors"
-                >
+                <FooterLink href="#services">
                   Intelligence Artificielle
-                </a>
+                </FooterLink>
               </li>
               <li>
-                <a
-                  href="#services"
-                  className="hover:text-white transition-colors"
-                >
-                  Automatisation
-                </a>
+                <FooterLink href="#services">Automatisation</FooterLink>
               </li>
             </ul>
           </div>
