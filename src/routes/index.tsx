@@ -322,7 +322,14 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
       }`}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 md:py-5">
-        <a href="#home" className="flex items-center">
+        <a
+          href="#home"
+          onClick={(e) => {
+            e.preventDefault();
+            scrollToSection("home");
+          }}
+          className="flex items-center"
+        >
           <img src="/logo.png" alt="NOVA BNISIT" className="h-20" />
         </a>
         <nav className="hidden items-center gap-8 md:flex">
@@ -330,6 +337,10 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
             <a
               key={n.href}
               href={n.href}
+              onClick={(e) => {
+                e.preventDefault();
+                scrollToSection(n.href.slice(1));
+              }}
               className="text-sm font-medium text-white/60 transition hover:text-white relative group"
             >
               {n.label}
@@ -345,6 +356,10 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
         <div className="flex items-center gap-3">
           <a
             href="#contact"
+            onClick={(e) => {
+              e.preventDefault();
+              scrollToSection("contact");
+            }}
             className="hidden md:inline-flex btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold"
           >
             Demander un devis
@@ -375,7 +390,15 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
                 <a
                   key={n.href}
                   href={n.href}
-                  onClick={() => setOpen(false)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setOpen(false);
+                    // Laisse le menu se replier avant de défiler, sinon le
+                    // scroll part pendant l'animation de fermeture.
+                    requestAnimationFrame(() =>
+                      scrollToSection(n.href.slice(1)),
+                    );
+                  }}
                   className="py-2 text-white/70 hover:text-white transition-colors text-lg flex items-center gap-2"
                 >
                   {n.label}
@@ -388,6 +411,11 @@ function Navbar({ projectsCount }: { projectsCount: number }) {
               ))}
               <a
                 href="#contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setOpen(false);
+                  requestAnimationFrame(() => scrollToSection("contact"));
+                }}
                 className="btn-primary rounded-xl px-5 py-3 text-center font-semibold mt-2"
               >
                 Demander un devis
