@@ -30,6 +30,12 @@ import {
   ArrowUp,
   ArrowDown,
   Image as ImageIcon,
+  Images,
+  Star,
+  Monitor,
+  LayoutGrid,
+  Palette,
+  Sparkles,
   ExternalLink,
   Eye,
   Database,
@@ -49,6 +55,7 @@ import {
   saveSettingsFn,
   saveTestimonialFn,
 } from "@/api/content";
+import type { ProjectInput } from "@/api/content";
 import {
   deleteMessageFn,
   getMessagesFn,
@@ -574,6 +581,45 @@ function Messages({
 
 // ─── Projets ──────────────────────────────────────────────
 
+const PROJECT_TYPE_CHOICES = [
+  {
+    value: "website",
+    label: "Site Web",
+    hint: "Aperçu navigateur",
+    icon: Monitor,
+  },
+  {
+    value: "webapp",
+    label: "Web App",
+    hint: "Aperçu navigateur",
+    icon: LayoutGrid,
+  },
+  {
+    value: "graphic",
+    label: "Graphic",
+    hint: "Galerie d'images",
+    icon: Palette,
+  },
+  {
+    value: "branding",
+    label: "Branding",
+    hint: "Galerie d'images",
+    icon: Sparkles,
+  },
+  {
+    value: "design",
+    label: "Design",
+    hint: "Galerie d'images",
+    icon: LayoutGrid,
+  },
+  {
+    value: "other",
+    label: "Autre",
+    hint: "Selon le lien",
+    icon: FolderOpen,
+  },
+];
+
 const EMPTY_PROJECT = {
   id: null as number | null,
   title: "",
@@ -581,6 +627,8 @@ const EMPTY_PROJECT = {
   description: "",
   image_url: "",
   link_url: "",
+  type: "website",
+  gallery_urls: [] as string[],
   sort_order: 0,
 };
 
@@ -597,8 +645,10 @@ function Projects({
 
   const rows = content.projects;
   const isFallback = rows.length === 0;
-
-  async function handleUpload(file: File) {
+  async function handleUpload(
+    file: File,
+    target: "cover" | "gallery" = "cover",
+  ) {
     if (!editing) return;
     if (file.size > MAX_UPLOAD_BYTES) {
       const mb = (file.size / 1024 / 1024).toFixed(1);
@@ -622,15 +672,21 @@ function Projects({
           data: { filename: file.name, contentType: file.type, base64 },
         }).then((res) => {
           setEditing((current) =>
-            current ? { ...current, image_url: res.url } : current,
+            current
+              ? target === "cover"
+                ? { ...current, image_url: res.url }
+                : {
+                    ...current,
+                    gallery_urls: [...current.gallery_urls, res.url],
+                  }
+              : current,
           );
         }),
-      "Image envoyée",
+      target === "cover" ? "Image envoyée" : "Image ajoutée à la galerie",
     );
     if (!ok) setUploading(false);
     setUploading(false);
   }
-
   return (
     <div className="space-y-6">
       {isFallback && (
@@ -700,17 +756,27 @@ function Projects({
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      let g: string[] = [];
+                      try {
+                        g = project.gallery_urls
+                          ? JSON.parse(project.gallery_urls)
+                          : [];
+                      } catch {
+                        g = [];
+                      }
                       setEditing({
                         id: project.id,
                         title: project.title,
                         category: project.category,
                         description: project.description,
-                        image_url: project.image_url,
+                        image_url: project.image_url || g[0] || "",
                         link_url: project.link_url,
+                        type: project.type || "website",
+                        gallery_urls: Array.isArray(g) ? g : [],
                         sort_order: project.sort_order,
-                      })
-                    }
+                      });
+                    }}
                     className="btn-ghost rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
                   >
                     <Pencil size={13} className="mr-1 inline" />
@@ -741,14 +807,30 @@ function Projects({
           value={editing}
           uploading={uploading}
           uploadError={uploadError}
-          onUpload={handleUpload}
+          onUpload={(file) => handleUpload(file, "cover")}
+          onUploadGallery={(file) => handleUpload(file, "gallery")}
           onClose={() => {
             setEditing(null);
             setUploadError(null);
           }}
           onSave={async (value) => {
+            const payload: ProjectInput = {
+              id: value.id,
+              title: value.title,
+              category: value.category,
+              description: value.description,
+              image_url: value.image_url || (value.gallery_urls?.[0] ?? ""),
+              link_url: value.link_url,
+              type: value.type || "website",
+              gallery_urls:
+                Array.isArray(value.gallery_urls) &&
+                value.gallery_urls.length > 0
+                  ? JSON.stringify(value.gallery_urls)
+                  : null,
+              sort_order: value.sort_order,
+            };
             const ok = await run(
-              () => saveProjectFn({ data: value }),
+              () => saveProjectFn({ data: payload }),
               "Projet enregistré",
             );
             if (ok) setEditing(null);
@@ -764,6 +846,7 @@ function ProjectModal({
   uploading,
   uploadError,
   onUpload,
+  onUploadGallery,
   onClose,
   onSave,
 }: {
@@ -771,6 +854,7 @@ function ProjectModal({
   uploading: boolean;
   uploadError: string | null;
   onUpload: (file: File) => void;
+  onUploadGallery: (file: File) => void;
   onClose: () => void;
   onSave: (value: typeof EMPTY_PROJECT) => void;
 }) {
@@ -867,6 +951,137 @@ function ProjectModal({
           onChange={(v) => set("link_url", v)}
           placeholder="https://…"
         />
+
+        {/* ─── Type de projet ─────────────────────────────── */}
+        <div>
+          <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+            Type de projet
+          </label>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {PROJECT_TYPE_CHOICES.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                onClick={() => set("type", choice.value)}
+                className={`rounded-xl border px-3 py-2.5 text-left text-xs transition ${
+                  form.type === choice.value
+                    ? "border-[color:var(--brand-2)] bg-[color:var(--brand-2)]/10 text-white"
+                    : "border-white/10 bg-white/[0.04] text-white/50 hover:text-white/80"
+                }`}
+              >
+                <span className="block font-semibold">{choice.label}</span>
+                <span className="mt-0.5 block text-[10px] text-white/35">
+                  {choice.hint}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-white/25">
+            Site web / Web App → aperçu dans un cadre navigateur. Graphic /
+            Branding → galerie d&apos;images.
+          </p>
+        </div>
+
+        {/* ─── Galerie ────────────────────────────────────── */}
+        <div>
+          <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+            Galerie ({form.gallery_urls.length})
+          </label>
+
+          {form.gallery_urls.length > 0 && (
+            <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {form.gallery_urls.map((url, i) => (
+                <div
+                  key={`${url}-${i}`}
+                  className="group relative aspect-square overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]"
+                >
+                  <img
+                    src={url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                  {url === form.image_url && (
+                    <span className="absolute left-1.5 top-1.5 rounded-md bg-emerald-500/90 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                      Cover
+                    </span>
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/70 opacity-0 transition group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        set("gallery_urls", [
+                          ...form.gallery_urls.slice(0, i),
+                          ...form.gallery_urls.slice(i + 1),
+                        ])
+                      }
+                      className="rounded-lg bg-red-500/80 p-1.5 text-white hover:bg-red-500"
+                      title="Supprimer"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                    {url !== form.image_url && (
+                      <button
+                        type="button"
+                        onClick={() => set("image_url", url)}
+                        className="rounded-lg bg-emerald-500/80 p-1.5 text-white hover:bg-emerald-500"
+                        title="Définir comme cover"
+                      >
+                        <Star size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length === 0) return;
+                files.forEach((file) => onUploadGallery(file));
+                e.currentTarget.value = "";
+              }}
+              className="hidden"
+              id="project-gallery"
+            />
+            <label
+              htmlFor="project-gallery"
+              className="btn-ghost flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-white/70 hover:text-white"
+            >
+              {uploading ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Images size={15} />
+              )}
+              {uploading ? "Envoi…" : "Ajouter des images"}
+            </label>
+            <input
+              value={form.gallery_urls[form.gallery_urls.length - 1] ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                const list = [...form.gallery_urls];
+                if (v) list[list.length - 1] = v;
+                else list.pop();
+                set("gallery_urls", list);
+              }}
+              placeholder="…ou collez une URL https://"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-white placeholder:text-white/25 focus:border-[color:var(--brand-2)] focus:outline-none"
+            />
+          </div>
+          <p className="mt-2 text-xs text-white/25">
+            Sélectionnez plusieurs fichiers d&apos;un coup pour remplir la
+            galerie. La 1re image sert de cover si aucune cover n&apos;est
+            définie.
+          </p>
+          {uploadError && (
+            <p className="mt-2 text-xs text-red-300/90">{uploadError}</p>
+          )}
+        </div>
 
         <ModalActions onClose={onClose} onSave={() => onSave(form)} />
       </div>

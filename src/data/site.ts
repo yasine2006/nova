@@ -27,6 +27,9 @@ export interface Project {
   category: string;
   desc: string;
   link?: string;
+  type?:
+    "website" | "webapp" | "graphic" | "branding" | "design" | "other" | string;
+  images?: string[];
 }
 
 export interface Testimonial {
@@ -102,21 +105,27 @@ export const projects: Project[] = [
     title: "FinFlow Dashboard",
     category: "SaaS · Analytique",
     desc: "Plateforme de gestion financière avec visualisation de données en temps réel.",
-    link: "",
+    link: "#",
+    type: "website",
+    images: [project1],
   },
   {
     img: project2,
     title: "Nova Assistant",
     category: "IA · Chatbot",
     desc: "Assistant intelligent pour le service client avec NLP avancé.",
-    link: "",
+    link: "#",
+    type: "webapp",
+    images: [project2],
   },
   {
     img: project3,
     title: "PulseMetrics",
     category: "Analyse de Données",
     desc: "Tableau de bord de métriques d'entreprise avec prédictions IA.",
-    link: "",
+    link: "#",
+    type: "website",
+    images: [project3],
   },
 ];
 

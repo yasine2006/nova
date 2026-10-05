@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Sparkles,
   ArrowRight,
@@ -24,6 +24,7 @@ import {
   X,
   Plus,
   Minus,
+  Monitor,
   Shield,
   Clock,
   Headphones,
@@ -943,15 +944,51 @@ function WhyUs() {
 }
 
 /* ---------------- Portfolio ---------------- */
+
+type Card = {
+  img?: string;
+  title: string;
+  cat: string;
+  desc: string;
+  link: string;
+  type: string;
+  gallery: string[];
+  mode: "site" | "gallery";
+};
+
+function projectMode(p: { type?: string; link?: string }): "site" | "gallery" {
+  const t = (p.type ?? "").trim().toLowerCase();
+  if (t === "website" || t === "webapp") return "site";
+  if (t === "graphic" || t === "branding" || t === "design") return "gallery";
+  // Heuristique : sans type explicite, un lien externe = projet site.
+  return (p.link ?? "").trim() ? "site" : "gallery";
+}
+
+function projectGallery(p: { img?: string; images?: string[] }): string[] {
+  const imgs = Array.isArray(p.images)
+    ? p.images.filter(
+        (u): u is string => typeof u === "string" && u.trim() !== "",
+      )
+    : [];
+  if (imgs.length > 0) return imgs;
+  return p.img ? [p.img] : [];
+}
+
 function Portfolio({ items }: { items: Project[] }) {
-  const list = items.map((p) => ({
-    img: p.img,
-    title: p.title,
-    cat: p.category,
-    desc: p.desc,
-    link: p.link ?? "",
-  }));
-  const [selected, setSelected] = useState<(typeof list)[number] | null>(null);
+  const list: Card[] = items.map((p) => {
+    const gallery = projectGallery(p);
+    return {
+      img: p.img ?? gallery[0],
+      title: p.title,
+      cat: p.category,
+      desc: p.desc,
+      link: (p.link ?? "").trim(),
+      type: (p.type ?? "").trim() || (p.link ? "website" : "graphic"),
+      gallery,
+      mode: projectMode(p),
+    };
+  });
+  const [selected, setSelected] = useState<Card | null>(null);
   return (
     <section id="portfolio" className="relative z-10 py-28">
       <div className="mx-auto max-w-7xl px-6">
@@ -1036,89 +1073,353 @@ function Portfolio({ items }: { items: Project[] }) {
 
       {/* Project Detail Modal */}
       {selected && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          onClick={() => setSelected(null)}
-        >
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            className="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto glass rounded-3xl border border-white/10"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close button */}
-            <button
-              onClick={() => setSelected(null)}
-              className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm text-white/60 hover:text-white transition-colors"
-            >
-              <X size={20} />
-            </button>
-
-            {/* Image */}
-            {selected.img && (
-              <div className="relative aspect-[16/9] overflow-hidden rounded-t-3xl">
-                <a
-                  href={selected.img}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="block cursor-zoom-in"
-                >
-                  <img
-                    src={selected.img}
-                    alt={selected.title}
-                    className="h-full w-full object-cover transition duration-300 hover:scale-[1.01]"
-                  />
-                </a>
-                <div className="absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent pointer-events-none" />
-              </div>
-            )}
-
-            {/* Content */}
-            <div className="p-8">
-              <p className="text-xs font-bold uppercase tracking-wider text-[#38BDF8]">
-                {selected.cat}
-              </p>
-              <h2 className="mt-3 text-3xl font-bold text-white">
-                {selected.title}
-              </h2>
-              <p className="mt-4 text-base text-white/50 leading-relaxed">
-                {selected.desc}
-              </p>
-
-              <div className="mt-8 flex gap-3">
-                {selected.link ? (
-                  <a
-                    href={selected.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-white"
-                    style={{
-                      background: "linear-gradient(135deg, #2563EB, #38BDF8)",
-                    }}
-                  >
-                    <ExternalLink size={16} /> Visiter le site
-                  </a>
-                ) : (
-                  <span className="text-sm text-white/30">
-                    Aucun lien disponible pour ce projet
-                  </span>
-                )}
-                <button
-                  onClick={() => setSelected(null)}
-                  className="flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-6 py-3 text-sm text-white/50 hover:text-white transition-colors"
-                >
-                  Fermer
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
+        <ProjectModal project={selected} onClose={() => setSelected(null)} />
       )}
     </section>
+  );
+}
+
+/* ---------------- Project Modal ---------------- */
+function ProjectModal({
+  project,
+  onClose,
+}: {
+  project: Card;
+  onClose: () => void;
+}) {
+  const shots = project.gallery;
+  const [index, setIndex] = useState(0);
+  const [zoom, setZoom] = useState(false);
+
+  const total = shots.length;
+  const safeIndex = total > 0 ? Math.min(index, total - 1) : 0;
+  const current = shots[safeIndex];
+
+  const go = useCallback(
+    (delta: number) =>
+      setIndex((i) => (total ? (i + delta + total) % total : 0)),
+    [total],
+  );
+
+  useEffect(() => {
+    setIndex(0);
+    setZoom(false);
+  }, [project.title]);
+
+  // Verrouille le scroll de la page + navigation clavier quand le modal est ouvert.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (zoom) setZoom(false);
+        else onClose();
+        return;
+      }
+      if (zoom) return;
+      if (project.mode === "site") {
+        if (e.key === "ArrowRight" && total > 1) go(1);
+        if (e.key === "ArrowLeft" && total > 1) go(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [go, onClose, project.mode, total, zoom]);
+
+  const url = project.link && project.link !== "#" ? project.link : "";
+
+  const actions = (
+    <div className="mt-8 flex flex-wrap gap-3">
+      {url ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110"
+          style={{ background: "linear-gradient(135deg, #2563EB, #38BDF8)" }}
+        >
+          <ExternalLink size={16} />
+          {project.mode === "site" ? "Ouvrir le site" : "Voir le projet"}
+        </a>
+      ) : (
+        <span className="flex items-center gap-2 text-sm text-white/30">
+          Aucun lien disponible pour ce projet
+        </span>
+      )}
+      <button
+        onClick={onClose}
+        className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm text-white/50 transition-colors hover:text-white"
+      >
+        Fermer
+      </button>
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: "easeOut" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={project.title}
+        className={`relative w-full overflow-y-auto rounded-3xl border border-white/10 glass ${
+          project.mode === "site" ? "max-w-5xl" : "max-w-4xl"
+        } max-h-[88vh]`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Fermer"
+          className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-sm transition-colors hover:text-white"
+        >
+          <X size={20} />
+        </button>
+
+        {/* ── Aperçu navigateur (site / web app) ── */}
+        {project.mode === "site" && (
+          <div className="overflow-hidden rounded-t-3xl">
+            <div className="flex items-center gap-3 border-b border-white/10 bg-black/40 px-4 py-3">
+              <div className="flex shrink-0 gap-1.5">
+                <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+                <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
+                <span className="h-3 w-3 rounded-full bg-[#28c840]" />
+              </div>
+              <div className="mx-auto flex min-w-0 max-w-md flex-1 items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5">
+                <Shield size={11} className="shrink-0 text-emerald-400/70" />
+                <span className="truncate text-[11px] text-white/50">
+                  {url ||
+                    `${project.title.toLowerCase().replace(/\s+/g, "")}.com`}
+                </span>
+              </div>
+              {url && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Ouvrir dans un nouvel onglet"
+                  className="shrink-0 text-white/40 transition-colors hover:text-white"
+                >
+                  <ExternalLink size={15} />
+                </a>
+              )}
+            </div>
+
+            <div className="relative aspect-[16/10] w-full bg-black/50 md:aspect-[16/9]">
+              {current ? (
+                <>
+                  <img
+                    src={current}
+                    alt={`${project.title} — aperçu ${safeIndex + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#050816] via-transparent to-transparent" />
+                </>
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <Monitor size={44} className="text-white/10" />
+                </div>
+              )}
+
+              {total > 1 && (
+                <>
+                  <GalleryNav side="left" onClick={() => go(-1)} />
+                  <GalleryNav side="right" onClick={() => go(1)} />
+                  <span className="absolute bottom-3 right-4 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-white/70">
+                    {safeIndex + 1} / {total}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {total > 1 && (
+              <Thumbnails
+                shots={shots}
+                active={safeIndex}
+                onSelect={setIndex}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Galerie d'images (graphic / branding / design) ── */}
+        {project.mode === "gallery" && (
+          <div className="overflow-hidden rounded-t-3xl">
+            <div className="relative flex min-h-[240px] items-center justify-center bg-black/40 p-4 md:min-h-[380px]">
+              {current ? (
+                <button
+                  onClick={() => setZoom(true)}
+                  aria-label="Agrandir l'image"
+                  className="group relative flex max-h-[52vh] w-full cursor-zoom-in items-center justify-center"
+                >
+                  <img
+                    src={current}
+                    alt={`${project.title} — image ${safeIndex + 1}`}
+                    className="max-h-[52vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl transition duration-300 group-hover:scale-[1.02]"
+                  />
+                  <span className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-semibold text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
+                    <Image size={12} /> Agrandir
+                  </span>
+                </button>
+              ) : (
+                <div className="flex flex-col items-center gap-3 py-12 text-white/20">
+                  <Image size={44} />
+                  <span className="text-sm">Aucune image pour ce projet</span>
+                </div>
+              )}
+
+              {total > 1 && (
+                <>
+                  <GalleryNav side="left" onClick={() => go(-1)} />
+                  <GalleryNav side="right" onClick={() => go(1)} />
+                  <span className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold text-white/70">
+                    {safeIndex + 1} / {total}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {total > 1 && (
+              <Thumbnails
+                shots={shots}
+                active={safeIndex}
+                onSelect={setIndex}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Texte ── */}
+        <div className="p-6 md:p-8">
+          <p className="text-xs font-bold uppercase tracking-wider text-[#38BDF8]">
+            {project.cat}
+          </p>
+          <h2 className="mt-3 text-2xl font-bold text-white md:text-3xl">
+            {project.title}
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-white/50">
+            {project.desc}
+          </p>
+          {actions}
+        </div>
+      </motion.div>
+
+      {/* Lightbox */}
+      <AnimatePresence>
+        {zoom && current && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 p-4"
+            onClick={() => setZoom(false)}
+          >
+            <button
+              onClick={() => setZoom(false)}
+              aria-label="Fermer"
+              className="absolute right-5 top-5 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white/80 transition-colors hover:text-white"
+            >
+              <X size={22} />
+            </button>
+
+            <motion.img
+              key={current}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.25 }}
+              src={current}
+              alt={`${project.title} — image ${safeIndex + 1}`}
+              className="max-h-[88vh] max-w-full cursor-zoom-out rounded-xl object-contain"
+              onClick={() => setZoom(false)}
+            />
+
+            {total > 1 && (
+              <>
+                <GalleryNav side="left" onClick={() => go(-1)} dark />
+                <GalleryNav side="right" onClick={() => go(1)} dark />
+                <span className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
+                  {safeIndex + 1} / {total}
+                </span>
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function GalleryNav({
+  side,
+  onClick,
+  dark,
+}: {
+  side: "left" | "right";
+  onClick: () => void;
+  dark?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={side === "left" ? "Image précédente" : "Image suivante"}
+      className={`absolute top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border transition ${
+        side === "left" ? "left-3 md:left-4" : "right-3 md:right-4"
+      } ${
+        dark
+          ? "border-white/20 bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
+          : "border-white/20 bg-black/60 text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+      }`}
+    >
+      {side === "left" ? (
+        <ChevronRight size={20} className="rotate-180" />
+      ) : (
+        <ChevronRight size={20} />
+      )}
+    </button>
+  );
+}
+
+function Thumbnails({
+  shots,
+  active,
+  onSelect,
+}: {
+  shots: string[];
+  active: number;
+  onSelect: (i: number) => void;
+}) {
+  return (
+    <div className="flex gap-2 overflow-x-auto border-t border-white/10 bg-black/30 px-4 py-3 [scrollbar-width:thin]">
+      {shots.map((shot, i) => (
+        <button
+          key={`${shot}-${i}`}
+          onClick={() => onSelect(i)}
+          aria-label={`Voir l'image ${i + 1}`}
+          aria-current={i === active}
+          className={`relative h-14 w-20 shrink-0 overflow-hidden rounded-lg border-2 transition md:h-16 md:w-24 ${
+            i === active
+              ? "border-[color:var(--brand-2)] opacity-100"
+              : "border-transparent opacity-45 hover:opacity-80"
+          }`}
+        >
+          <img
+            src={shot}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
+        </button>
+      ))}
+    </div>
   );
 }
 

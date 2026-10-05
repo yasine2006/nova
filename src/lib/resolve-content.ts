@@ -93,12 +93,35 @@ function toService(row: ServiceRow): Service {
 }
 
 function toProject(row: ProjectRow): Project {
+  let gallery: string[] = [];
+
+  if (row.gallery_urls) {
+    try {
+      const parsed = JSON.parse(row.gallery_urls);
+      if (Array.isArray(parsed)) {
+        gallery = parsed
+          .filter((u) => typeof u === "string" && u.trim().length > 0)
+          .map((u) => u.trim());
+      }
+    } catch {
+      gallery = [];
+    }
+  }
+
+  const cover = row.image_url?.trim() || gallery[0] || undefined;
+
+  if (gallery.length === 0 && cover) {
+    gallery = [cover];
+  }
+
   return {
-    img: row.image_url || undefined,
+    img: cover,
     title: row.title,
     category: row.category,
     desc: row.description,
-    link: row.link_url || "",
+    link: row.link_url?.trim() || "",
+    type: row.type?.trim() || undefined,
+    images: gallery,
   };
 }
 

@@ -16,6 +16,8 @@ export interface ProjectRow {
   image_url: string;
   link_url: string;
   sort_order: number;
+  type?: string | null;
+  gallery_urls?: string | null; // JSON: ["url1","url2",...]
 }
 
 export interface ServiceRow {
@@ -69,30 +71,40 @@ export const getPublicContentFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<Content | null> => {
     if (!isDatabaseConfigured()) return null;
 
-    const [projects, services, testimonials, faqs, settings] =
-      await Promise.all([
-        tryQuery<ProjectRow>(
-          (
-            sql,
-          ) => sql`SELECT id, title, category, description, image_url, link_url, sort_order
-                      FROM projects ORDER BY sort_order, id`,
-        ),
-        tryQuery<ServiceRow>(
-          (sql) => sql`SELECT id, title, description, icon, color, sort_order
+    const [services, testimonials, faqs, settings] = await Promise.all([
+      tryQuery<ServiceRow>(
+        (sql) => sql`SELECT id, title, description, icon, color, sort_order
                       FROM services ORDER BY sort_order, id`,
-        ),
-        tryQuery<TestimonialRow>(
-          (sql) => sql`SELECT id, name, role, quote, sort_order
+      ),
+      tryQuery<TestimonialRow>(
+        (sql) => sql`SELECT id, name, role, quote, sort_order
                       FROM testimonials ORDER BY sort_order, id`,
-        ),
-        tryQuery<FaqRow>(
-          (sql) =>
-            sql`SELECT id, question, answer, sort_order FROM faqs ORDER BY sort_order, id`,
-        ),
-        tryQuery<{ key: string; value: string }>(
-          (sql) => sql`SELECT key, value FROM settings`,
-        ),
-      ]);
+      ),
+      tryQuery<FaqRow>(
+        (sql) =>
+          sql`SELECT id, question, answer, sort_order FROM faqs ORDER BY sort_order, id`,
+      ),
+      tryQuery<{ key: string; value: string }>(
+        (sql) => sql`SELECT key, value FROM settings`,
+      ),
+    ]);
+
+    // Colonnes optionnelles projects.type / projects.gallery_urls.
+    // Si la migration n'a pas été jouée, on retombe sur l'ancien SELECT
+    // plutôt que de faire échouer tout le contenu du site.
+    const projects =
+      (await tryQuery<ProjectRow>(
+        (
+          sql,
+        ) => sql`SELECT id, title, category, description, image_url, link_url, type, gallery_urls, sort_order
+                      FROM projects ORDER BY sort_order, id`,
+      )) ??
+      (await tryQuery<ProjectRow>(
+        (
+          sql,
+        ) => sql`SELECT id, title, category, description, image_url, link_url, sort_order
+                      FROM projects ORDER BY sort_order, id`,
+      ));
 
     if (!projects || !services || !testimonials || !faqs || !settings)
       return null;
@@ -139,6 +151,48 @@ function cleanUrl(value: unknown): string {
   return parsed.toString();
 }
 
+const PROJECT_TYPES = [
+  "website",
+  "webapp",
+  "graphic",
+  "branding",
+  "design",
+  "other",
+];
+
+/** Ne conserve que les URLs http(s) de la galerie, puis les re-sérialise. */
+function cleanGallery(value: unknown): string | null {
+  let list: unknown = value;
+
+  if (typeof list === "string") {
+    const raw = list.trim();
+    if (!raw) return null;
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      // Accepte aussi une simple liste séparée par des virgules/nouvelles lignes.
+      list = raw
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+  }
+
+  if (!Array.isArray(list)) return null;
+
+  const urls = list
+    .map((u) => cleanUrl(u))
+    .filter((u) => u.length > 0)
+    .slice(0, 24);
+
+  return urls.length > 0 ? JSON.stringify(urls) : null;
+}
+
+function cleanProjectType(value: unknown): string {
+  const t = str(value, 40).toLowerCase();
+  return PROJECT_TYPES.includes(t) ? t : "website";
+}
+
 export interface ProjectInput {
   id?: number | null;
   title: string;
@@ -146,6 +200,8 @@ export interface ProjectInput {
   description: string;
   image_url: string;
   link_url: string;
+  type?: string | null;
+  gallery_urls?: string | null;
   sort_order: number;
 }
 
@@ -194,23 +250,54 @@ export const saveProjectFn = createServerFn({ method: "POST" })
       description: str(data.description, 2000),
       image_url: cleanUrl(data.image_url),
       link_url: cleanUrl(data.link_url),
+      type: cleanProjectType(data.type),
+      gallery_urls: cleanGallery(data.gallery_urls),
       sort_order: int(data.sort_order),
     };
 
     if (data.id) {
-      await sql`
-        UPDATE projects SET
-          title = ${payload.title}, category = ${payload.category},
-          description = ${payload.description}, image_url = ${payload.image_url},
-          link_url = ${payload.link_url}, sort_order = ${payload.sort_order}
-        WHERE id = ${int(data.id)}
-      `;
+      // `type` / `gallery_urls` peuvent manquer si la migration n'a pas été
+      // jouée : on tente la version complète, sinon on retombe sur l'ancien
+      // UPDATE pour ne pas bloquer l'enregistrement.
+      const updated = await tryQuery(
+        (q) => q`
+          UPDATE projects SET
+            title = ${payload.title}, category = ${payload.category},
+            description = ${payload.description}, image_url = ${payload.image_url},
+            link_url = ${payload.link_url}, type = ${payload.type},
+            gallery_urls = ${payload.gallery_urls}, sort_order = ${payload.sort_order}
+          WHERE id = ${int(data.id)}
+          RETURNING id
+        `,
+      );
+
+      if (!updated) {
+        await sql`
+          UPDATE projects SET
+            title = ${payload.title}, category = ${payload.category},
+            description = ${payload.description}, image_url = ${payload.image_url},
+            link_url = ${payload.link_url}, sort_order = ${payload.sort_order}
+          WHERE id = ${int(data.id)}
+        `;
+      }
     } else {
-      await sql`
-        INSERT INTO projects (title, category, description, image_url, link_url, sort_order)
-        VALUES (${payload.title}, ${payload.category}, ${payload.description},
-                ${payload.image_url}, ${payload.link_url}, ${payload.sort_order})
-      `;
+      const inserted = await tryQuery(
+        (q) => q`
+          INSERT INTO projects (title, category, description, image_url, link_url, type, gallery_urls, sort_order)
+          VALUES (${payload.title}, ${payload.category}, ${payload.description},
+                  ${payload.image_url}, ${payload.link_url}, ${payload.type},
+                  ${payload.gallery_urls}, ${payload.sort_order})
+          RETURNING id
+        `,
+      );
+
+      if (!inserted) {
+        await sql`
+          INSERT INTO projects (title, category, description, image_url, link_url, sort_order)
+          VALUES (${payload.title}, ${payload.category}, ${payload.description},
+                  ${payload.image_url}, ${payload.link_url}, ${payload.sort_order})
+        `;
+      }
     }
 
     return { ok: true };

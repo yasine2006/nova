@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_sort ON projects (sort_order, id);
 
+-- ─── Projets : type + galerie (aperçu site vs galerie d'images) ───
+-- `type`         : website | webapp | graphic | branding | design | other
+-- `gallery_urls` : JSON array d'URLs ["https://…","https://…"]
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'website';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS gallery_urls TEXT;
+
 -- ─── Services ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS services (
   id          SERIAL PRIMARY KEY,
