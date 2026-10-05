@@ -67,6 +67,18 @@ export const Route = createFileRoute("/")({
 
 const nav = navLinks;
 
+/**
+ * Smooth-scroll vers une section par son id, en tenant compte de la navbar
+ * fixe. `scroll-padding-top` (voir styles.css) fait déjà le décalage ; on
+ * passe par scrollIntoView pour éviter de dependre du hash.
+ */
+function scrollToSection(id: string) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  history.replaceState(null, "", `#${id}`);
+}
+
 const fadeUp = {
   hidden: { opacity: 0, y: 40, rotateX: 8 },
   show: {
@@ -686,6 +698,15 @@ function Services({ items }: { items: Service[] }) {
               style={{
                 transformStyle: "preserve-3d",
                 transitionDelay: `${i * 0.05}s`,
+              }}
+              onClick={() => scrollToSection("portfolio")}
+              role="link"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  scrollToSection("portfolio");
+                }
               }}
             >
               <div
