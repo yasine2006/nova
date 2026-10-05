@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Sparkles,
   ArrowRight,
@@ -1158,7 +1159,15 @@ function ProjectModal({
     </div>
   );
 
-  return (
+  // Le modal est rendu dans un portail sur <body> : reste dans la section
+  // #portfolio, il serait piégé dans son contexte d'empilement (z-10) et
+  // passerait sous les sections suivantes (Process, FAQ, Contact…).
+  const [portal, setPortal] = useState<HTMLElement | null>(null);
+  useEffect(() => setPortal(document.body), []);
+
+  if (!portal) return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={onClose}
@@ -1354,7 +1363,8 @@ function ProjectModal({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </div>,
+    portal,
   );
 }
 
