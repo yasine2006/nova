@@ -1410,10 +1410,15 @@ function ProjectModal({
   const shots = project.gallery;
   const [index, setIndex] = useState(0);
   const [zoom, setZoom] = useState(false);
+  // Pour les projets « site », les captures restent accessibles dans un
+  // onglet dédié : le zoom n'existe que sur la galerie, pas sur l'aperçu.
+  const [tab, setTab] = useState<"preview" | "shots">("preview");
 
   const total = shots.length;
   const safeIndex = total > 0 ? Math.min(index, total - 1) : 0;
   const current = shots[safeIndex];
+  const hasShotsTab = total > 0;
+  const showGallery = project.mode === "gallery" || tab === "shots";
 
   const go = useCallback(
     (delta: number) =>
@@ -1424,6 +1429,7 @@ function ProjectModal({
   useEffect(() => {
     setIndex(0);
     setZoom(false);
+    setTab("preview");
   }, [project.title]);
 
   // Verrouille le scroll de la page + navigation clavier quand le modal est ouvert.
@@ -1437,7 +1443,8 @@ function ProjectModal({
         return;
       }
       if (zoom) return;
-      if (project.mode === "site") {
+      // Les flèches navigate entre les captures quand on regarde la galerie.
+      if (project.mode === "site" && !showGallery) {
         if (e.key === "ArrowRight" && total > 1) go(1);
         if (e.key === "ArrowLeft" && total > 1) go(-1);
       }
@@ -1447,7 +1454,7 @@ function ProjectModal({
       document.body.style.overflow = previous;
       window.removeEventListener("keydown", onKey);
     };
-  }, [go, onClose, project.mode, total, zoom]);
+  }, [go, onClose, project.mode, showGallery, total, zoom]);
 
   const url = project.link && project.link !== "#" ? project.link : "";
 
@@ -1512,8 +1519,35 @@ function ProjectModal({
           <X size={20} />
         </button>
 
+        {/* ── Onglets : aperçu du site / galerie zoomable ── */}
+        {project.mode === "site" && hasShotsTab && (
+          <div className="flex items-center gap-1 border-b border-white/10 bg-black/30 px-4 py-2.5">
+            <button
+              onClick={() => setTab("preview")}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                tab === "preview"
+                  ? "bg-white/15 text-white"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              Aperçu du site
+            </button>
+            <button
+              onClick={() => setTab("shots")}
+              className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                tab === "shots"
+                  ? "bg-white/15 text-white"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <Images size={12} />
+              Galerie ({total})
+            </button>
+          </div>
+        )}
+
         {/* ── Aperçu navigateur (site / web app) ── */}
-        {project.mode === "site" && (
+        {project.mode === "site" && !showGallery && (
           <div className="overflow-hidden rounded-t-3xl">
             <div className="flex items-center gap-3 border-b border-white/10 bg-black/40 px-4 py-3">
               <div className="flex shrink-0 gap-1.5">
@@ -1578,8 +1612,8 @@ function ProjectModal({
           </div>
         )}
 
-        {/* ── Galerie d'images (graphic / branding / design) ── */}
-        {project.mode === "gallery" && (
+        {/* ── Galerie d'images (graphic / branding / design + onglet galerie) ── */}
+        {showGallery && (
           <GalleryView
             project={project}
             shots={shots}
