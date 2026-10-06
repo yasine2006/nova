@@ -1173,7 +1173,7 @@ function Portfolio({ items }: { items: Project[] }) {
                 )}
 
                 {/* Pastille zoom */}
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-500 group-hover:opacity-100 group-focus-visible:opacity-100">
+                <div className="zoom-hint absolute inset-0 flex items-center justify-center transition-opacity duration-500">
                   <div className="flex flex-col items-center gap-2">
                     <span
                       className="flex h-14 w-14 items-center justify-center rounded-full backdrop-blur-md transition-transform duration-300 group-hover:scale-110"

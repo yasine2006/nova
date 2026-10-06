@@ -247,6 +247,24 @@
 .animate-shimmer { animation: shimmer 3s ease-in-out infinite; background-size: 200% 100%; }
 .animate-glow-ring { animation: glow-ring 4s ease-in-out infinite; }
 
+/* Pastille zoom des cards du portfolio.
+   Sur pointeur fin (souris) elle est masquée jusqu'au survol.
+   Sur tactile il n'y a pas de survol : elle reste visible, sinon
+   l'utilisateur n'a aucun indice que la card est zoomable. */
+.zoom-hint {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .zoom-hint {
+    opacity: 0;
+  }
+  .group:hover .zoom-hint,
+  .group:focus-within .zoom-hint {
+    opacity: 1;
+  }
+}
+
 /* Accessibility: reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
