@@ -41,7 +41,8 @@ import {
   Loader2,
   AlertCircle,
   Image,
-  Eye,
+  Images,
+  ZoomIn,
   ExternalLink,
   Facebook,
   Instagram,
@@ -1115,6 +1116,19 @@ function Portfolio({ items }: { items: Project[] }) {
               variants={flipUp}
               className="group relative overflow-hidden glass cursor-pointer"
               onClick={() => setSelected(p)}
+              // Zoom "loupe" : le point d'origine suit le curseur.
+              onMouseMove={(e) => {
+                const el = e.currentTarget;
+                const r = el.getBoundingClientRect();
+                el.style.setProperty(
+                  "--zx",
+                  `${((e.clientX - r.left) / r.width) * 100}%`,
+                );
+                el.style.setProperty(
+                  "--zy",
+                  `${((e.clientY - r.top) / r.height) * 100}%`,
+                );
+              }}
               whileHover={{
                 y: -10,
                 rotateX: 5,
@@ -1136,7 +1150,7 @@ function Portfolio({ items }: { items: Project[] }) {
                     decoding="async"
                     width={600}
                     height={450}
-                    className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
+                    className="h-full w-full object-cover transition-transform duration-500 ease-out will-change-transform [transform-origin:var(--zx,50%)_var(--zy,50%)] group-hover:scale-[1.4] group-focus-visible:scale-[1.4]"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center bg-white/[0.03]">
@@ -1149,15 +1163,30 @@ function Portfolio({ items }: { items: Project[] }) {
                     Lien disponible
                   </span>
                 )}
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-500 group-hover:opacity-100">
-                  <div
-                    className="flex h-14 w-14 items-center justify-center rounded-full backdrop-blur-md"
-                    style={{
-                      background: "rgba(255,255,255,0.15)",
-                      border: "1px solid rgba(255,255,255,0.25)",
-                    }}
-                  >
-                    <Eye size={22} className="text-white" />
+
+                {/* Nombre de captures */}
+                {p.gallery.length > 1 && (
+                  <span className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 rounded-full bg-[#050816]/80 px-2.5 py-1 text-[10px] font-bold text-white/80 ring-1 ring-white/20 backdrop-blur">
+                    <Images size={11} />
+                    {p.gallery.length}
+                  </span>
+                )}
+
+                {/* Pastille zoom */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-500 group-hover:opacity-100 group-focus-visible:opacity-100">
+                  <div className="flex flex-col items-center gap-2">
+                    <span
+                      className="flex h-14 w-14 items-center justify-center rounded-full backdrop-blur-md transition-transform duration-300 group-hover:scale-110"
+                      style={{
+                        background: "rgba(255,255,255,0.15)",
+                        border: "1px solid rgba(255,255,255,0.25)",
+                      }}
+                    >
+                      <ZoomIn size={22} className="text-white" />
+                    </span>
+                    <span className="text-[11px] font-semibold text-white/85">
+                      {p.mode === "site" ? "Voir le projet" : "Agrandir"}
+                    </span>
                   </div>
                 </div>
               </div>
