@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+﻿import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -43,6 +43,7 @@ import {
   Image,
   Images,
   ZoomIn,
+  Maximize2,
   ExternalLink,
   Facebook,
   Instagram,
@@ -1213,6 +1214,192 @@ function Portfolio({ items }: { items: Project[] }) {
 }
 
 /* ---------------- Project Modal ---------------- */
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 5;
+
+/**
+ * Moteur de zoom partagé : utilisé par la galerie du modal ET par le
+ * lightbox plein écran, pour que les deux se comportent pareil.
+ * - molette / pincement / double-clic pour zoomer
+ * - glisser-déposer et pan quand on est zoomé
+ */
+function useZoom({
+  max = MAX_ZOOM,
+  initial = MIN_ZOOM,
+  resetKey,
+}: {
+  max?: number;
+  initial?: number;
+  resetKey?: string;
+} = {}) {
+  const [scale, setScale] = useState(initial);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(
+    null,
+  );
+  const pinch = useRef(new Map<number, { x: number; y: number }>());
+  const pinchStart = useRef<{ dist: number; scale: number } | null>(null);
+
+  // Chaque nouvelle capture repart à son échelle initiale.
+  useEffect(() => {
+    setScale(initial);
+    setOffset({ x: 0, y: 0 });
+  }, [resetKey, initial]);
+
+  const clamp = useCallback(
+    (n: number) => Math.min(max, Math.max(MIN_ZOOM, n)),
+    [max],
+  );
+
+  const reset = useCallback(() => {
+    setScale(MIN_ZOOM);
+    setOffset({ x: 0, y: 0 });
+  }, []);
+
+  const zoomBy = useCallback(
+    (factor: number) => setScale((s) => clamp(s * factor)),
+    [clamp],
+  );
+
+  const zoomed = scale > MIN_ZOOM;
+
+  const handlers = {
+    onPointerDown(e: React.PointerEvent) {
+      pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch.current.size === 2) {
+        const [a, b] = [...pinch.current.values()];
+        pinchStart.current = {
+          dist: Math.hypot(a.x - b.x, a.y - b.y),
+          scale,
+        };
+        drag.current = null;
+        return;
+      }
+      if (zoomed) {
+        drag.current = {
+          x: e.clientX,
+          y: e.clientY,
+          ox: offset.x,
+          oy: offset.y,
+        };
+        setDragging(true);
+        (e.target as Element).setPointerCapture?.(e.pointerId);
+      }
+    },
+    onPointerMove(e: React.PointerEvent) {
+      if (!pinch.current.has(e.pointerId)) return;
+      pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pinch.current.size === 2 && pinchStart.current) {
+        const [a, b] = [...pinch.current.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchStart.current.dist > 0) {
+          setScale(
+            clamp((dist / pinchStart.current.dist) * pinchStart.current.scale),
+          );
+        }
+        return;
+      }
+
+      if (drag.current) {
+        setOffset({
+          x: drag.current.ox + (e.clientX - drag.current.x),
+          y: drag.current.oy + (e.clientY - drag.current.y),
+        });
+      }
+    },
+    onPointerUp(e: React.PointerEvent) {
+      pinch.current.delete(e.pointerId);
+      if (pinch.current.size < 2) pinchStart.current = null;
+      if (drag.current) {
+        drag.current = null;
+        setDragging(false);
+      }
+    },
+    onWheel(e: React.WheelEvent) {
+      zoomBy(e.deltaY < 0 ? 1.14 : 1 / 1.14);
+    },
+    onDoubleClick(e: React.MouseEvent) {
+      e.stopPropagation();
+      setScale((s) => (s > MIN_ZOOM ? MIN_ZOOM : 2.5));
+    },
+  };
+
+  return {
+    scale,
+    offset,
+    dragging,
+    zoomed,
+    clamp,
+    reset,
+    zoomBy,
+    setScale,
+    handlers,
+    style: {
+      scale,
+      x: offset.x,
+      y: offset.y,
+      touchAction: zoomed ? ("none" as const) : ("zoom-in" as const),
+      transition: dragging ? "none" : "transform 120ms ease-out",
+    },
+  };
+}
+
+/** Barre de zoom − / pourcentage / + partagée par le modal et le lightbox. */
+function ZoomBar({
+  zoom,
+  className = "",
+}: {
+  zoom: ReturnType<typeof useZoom>;
+  className?: string;
+}) {
+  const { scale, clamp, reset, zoomBy } = zoom;
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className={`flex items-center gap-1 rounded-full bg-black/70 p-1 backdrop-blur-md ${className}`}
+    >
+      <button
+        onClick={() => zoomBy(1 / 1.5)}
+        disabled={scale <= MIN_ZOOM}
+        aria-label="Dézoomer"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <Minus size={16} />
+      </button>
+
+      <button
+        onClick={reset}
+        aria-label="Réinitialiser le zoom"
+        title="Réinitialiser"
+        className="min-w-[54px] rounded-full px-2 py-1.5 text-center text-xs font-bold tabular-nums text-white/85 transition-colors hover:bg-white/15"
+      >
+        {Math.round(scale * 100)}%
+      </button>
+
+      <button
+        onClick={() => zoomBy(1.5)}
+        disabled={scale >= MAX_ZOOM}
+        aria-label="Zoomer"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <Plus size={16} />
+      </button>
+
+      <button
+        onClick={() => clamp(1)}
+        aria-label="Revenir à la taille normale"
+        title="Taille normale"
+        className="ml-0.5 flex h-9 items-center justify-center gap-1 rounded-full px-2.5 text-[11px] font-semibold text-white/70 transition-colors hover:bg-white/15"
+      >
+        <Maximize2 size={13} />
+      </button>
+    </div>
+  );
+}
+
 function ProjectModal({
   project,
   onClose,
@@ -1393,49 +1580,14 @@ function ProjectModal({
 
         {/* ── Galerie d'images (graphic / branding / design) ── */}
         {project.mode === "gallery" && (
-          <div className="overflow-hidden rounded-t-3xl">
-            <div className="relative flex min-h-[240px] items-center justify-center bg-black/40 p-4 md:min-h-[380px]">
-              {current ? (
-                <button
-                  onClick={() => setZoom(true)}
-                  aria-label="Agrandir l'image"
-                  className="group relative flex max-h-[52vh] w-full cursor-zoom-in items-center justify-center"
-                >
-                  <img
-                    src={current}
-                    alt={`${project.title} — image ${safeIndex + 1}`}
-                    className="max-h-[52vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl transition duration-300 group-hover:scale-[1.02]"
-                  />
-                  <span className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-semibold text-white/70 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Image size={12} /> Agrandir
-                  </span>
-                </button>
-              ) : (
-                <div className="flex flex-col items-center gap-3 py-12 text-white/20">
-                  <Image size={44} />
-                  <span className="text-sm">Aucune image pour ce projet</span>
-                </div>
-              )}
-
-              {total > 1 && (
-                <>
-                  <GalleryNav side="left" onClick={() => go(-1)} />
-                  <GalleryNav side="right" onClick={() => go(1)} />
-                  <span className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold text-white/70">
-                    {safeIndex + 1} / {total}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {total > 1 && (
-              <Thumbnails
-                shots={shots}
-                active={safeIndex}
-                onSelect={setIndex}
-              />
-            )}
-          </div>
+          <GalleryView
+            project={project}
+            shots={shots}
+            index={safeIndex}
+            onSelect={setIndex}
+            onGo={go}
+            onExpand={() => setZoom(true)}
+          />
         )}
 
         {/* ── Texte ── */}
@@ -1473,8 +1625,103 @@ function ProjectModal({
   );
 }
 
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 5;
+function GalleryView({
+  project,
+  shots,
+  index,
+  onSelect,
+  onGo,
+  onExpand,
+}: {
+  project: Card;
+  shots: string[];
+  index: number;
+  onSelect: (i: number) => void;
+  onGo: (delta: number) => void;
+  onExpand: () => void;
+}) {
+  const total = shots.length;
+  const current = shots[index];
+  // Zoom piloté directement ici : pas besoin d'ouvrir le lightbox.
+  const zoom = useZoom({ initial: 1, resetKey: current });
+
+  if (!current) {
+    return (
+      <div className="overflow-hidden rounded-t-3xl">
+        <div className="flex flex-col items-center gap-3 bg-black/40 py-12 text-white/20">
+          <Image size={44} />
+          <span className="text-sm">Aucune image pour ce projet</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-t-3xl">
+      <div
+        onWheel={zoom.handlers.onWheel}
+        className="relative flex min-h-[240px] items-center justify-center bg-black/40 p-4 md:min-h-[380px]"
+      >
+        <img
+          src={current}
+          alt={`${project.title} — image ${index + 1}`}
+          draggable={false}
+          onClick={() => (zoom.zoomed ? zoom.reset() : zoom.setScale(2))}
+          onDoubleClick={zoom.handlers.onDoubleClick}
+          onPointerDown={zoom.handlers.onPointerDown}
+          onPointerMove={zoom.handlers.onPointerMove}
+          onPointerUp={zoom.handlers.onPointerUp}
+          onPointerCancel={zoom.handlers.onPointerUp}
+          className={`max-h-[52vh] w-auto max-w-full select-none rounded-2xl object-contain shadow-2xl ${
+            zoom.dragging
+              ? "cursor-grabbing"
+              : zoom.zoomed
+                ? "cursor-grab"
+                : "cursor-zoom-in"
+          }`}
+          style={zoom.style}
+        />
+
+        {/* Barre de zoom — visible en permanence dans la modal */}
+        <ZoomBar
+          zoom={zoom}
+          className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2"
+        />
+
+        {/* Bouton plein écran */}
+        <button
+          onClick={onExpand}
+          aria-label="Plein écran"
+          title="Plein écran"
+          className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white/80 backdrop-blur-md transition-colors hover:bg-black/90 hover:text-white"
+        >
+          <Maximize2 size={16} />
+        </button>
+
+        {/* Indice quand on est au repos */}
+        {!zoom.zoomed && (
+          <span className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-semibold text-white/70">
+            Cliquez pour zoomer
+          </span>
+        )}
+
+        {total > 1 && (
+          <>
+            <GalleryNav side="left" onClick={() => onGo(-1)} />
+            <GalleryNav side="right" onClick={() => onGo(1)} />
+            <span className="pointer-events-none absolute right-3 bottom-14 z-10 rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold text-white/70">
+              {index + 1} / {total}
+            </span>
+          </>
+        )}
+      </div>
+
+      {total > 1 && (
+        <Thumbnails shots={shots} active={index} onSelect={onSelect} />
+      )}
+    </div>
+  );
+}
 
 function Lightbox({
   src,
@@ -1493,107 +1740,32 @@ function Lightbox({
   onPrev?: () => void;
   onNext?: () => void;
 }) {
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(
-    null,
-  );
-  const pinch = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const pinchStart = useRef<{ dist: number; scale: number } | null>(null);
+  const zoom = useZoom({ resetKey: src });
+  const { scale, clamp, reset, zoomBy, zoomed, dragging, handlers, style } =
+    zoom;
 
-  // Chaque nouvelle image repart à 100 %.
-  useEffect(() => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }, [src]);
-
-  const reset = useCallback(() => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }, []);
-
-  const clampScale = useCallback(
-    (n: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, n)),
-    [],
-  );
-
-  // Molette pour zoomer, sans faire défiler la page.
+  // Molette : on bloque le défilement de la page seulement en plein écran.
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      setScale((s) => clampScale(s * (e.deltaY < 0 ? 1.14 : 1 / 1.14)));
+      zoomBy(e.deltaY < 0 ? 1.14 : 1 / 1.14);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
-  }, [clampScale]);
+  }, [zoomBy]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "+" || e.key === "=") setScale((s) => clampScale(s + 0.5));
-      if (e.key === "-" || e.key === "_") setScale((s) => clampScale(s - 0.5));
+      if (e.key === "+" || e.key === "=") zoomBy(1.5);
+      if (e.key === "-" || e.key === "_") zoomBy(1 / 1.5);
       if (e.key === "0") reset();
       if (e.key === "ArrowRight" && onNext) onNext();
       if (e.key === "ArrowLeft" && onPrev) onPrev();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clampScale, onClose, onNext, onPrev, reset]);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pinch.current.size === 2) {
-      const [a, b] = [...pinch.current.values()];
-      pinchStart.current = {
-        dist: Math.hypot(a.x - b.x, a.y - b.y),
-        scale,
-      };
-      drag.current = null;
-      return;
-    }
-    if (scale > 1) {
-      drag.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
-      setDragging(true);
-      (e.target as Element).setPointerCapture?.(e.pointerId);
-    }
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!pinch.current.has(e.pointerId)) return;
-    pinch.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (pinch.current.size === 2 && pinchStart.current) {
-      const [a, b] = [...pinch.current.values()];
-      const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinchStart.current.dist > 0) {
-        setScale(
-          clampScale(
-            (dist / pinchStart.current.dist) * pinchStart.current.scale,
-          ),
-        );
-      }
-      return;
-    }
-
-    if (drag.current) {
-      setOffset({
-        x: drag.current.ox + (e.clientX - drag.current.x),
-        y: drag.current.oy + (e.clientY - drag.current.y),
-      });
-    }
-  };
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    pinch.current.delete(e.pointerId);
-    if (pinch.current.size < 2) pinchStart.current = null;
-    if (drag.current) {
-      drag.current = null;
-      setDragging(false);
-    }
-  };
-
-  const zoomed = scale > 1;
+  }, [onClose, onNext, onPrev, reset, zoomBy]);
 
   return (
     <motion.div
@@ -1612,39 +1784,6 @@ function Lightbox({
         <X size={22} />
       </button>
 
-      {/* Barre de zoom */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full bg-white/10 p-1.5 backdrop-blur-md"
-      >
-        <button
-          onClick={() => setScale((s) => clampScale(s - 0.5))}
-          disabled={scale <= MIN_ZOOM}
-          aria-label="Dézoomer"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          <Minus size={18} />
-        </button>
-
-        <button
-          onClick={reset}
-          aria-label="Réinitialiser le zoom"
-          title="Réinitialiser (0)"
-          className="min-w-[58px] rounded-full px-2 py-2 text-center text-xs font-bold tabular-nums text-white/85 transition-colors hover:bg-white/15"
-        >
-          {Math.round(scale * 100)}%
-        </button>
-
-        <button
-          onClick={() => setScale((s) => clampScale(s + 0.5))}
-          disabled={scale >= MAX_ZOOM}
-          aria-label="Zoomer"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          <Plus size={18} />
-        </button>
-      </div>
-
       <motion.img
         src={src}
         alt={alt}
@@ -1654,44 +1793,39 @@ function Lightbox({
           if (zoomed) reset();
           else onClose();
         }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          setScale((s) => (s > 1 ? 1 : 2.5));
-        }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onDoubleClick={handlers.onDoubleClick}
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerUp}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.25 }}
         className={`max-h-[88vh] max-w-full select-none rounded-xl object-contain ${
-          zoomed
-            ? dragging
-              ? "cursor-grabbing"
-              : "cursor-grab"
-            : "cursor-zoom-in"
+          dragging
+            ? "cursor-grabbing"
+            : zoomed
+              ? "cursor-grab"
+              : "cursor-zoom-in"
         }`}
-        style={{
-          scale,
-          x: offset.x,
-          y: offset.y,
-          touchAction: zoomed ? "none" : "zoom-in",
-          transition: dragging ? "none" : "transform 120ms ease-out",
-        }}
+        style={style}
+      />
+
+      <ZoomBar
+        zoom={zoom}
+        className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2"
       />
 
       {onPrev && <GalleryNav side="left" onClick={onPrev} dark />}
       {onNext && <GalleryNav side="right" onClick={onNext} dark />}
       {total > 1 && (
-        <span className="absolute bottom-6 right-6 z-20 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
+        <span className="absolute right-6 bottom-6 z-20 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
           {index + 1} / {total}
         </span>
       )}
     </motion.div>
   );
 }
-
 function GalleryNav({
   side,
   onClick,
